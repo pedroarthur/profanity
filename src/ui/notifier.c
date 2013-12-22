@@ -38,6 +38,7 @@
 
 static void _notify(const char * const message, int timeout,
     const char * const category);
+static void _do_notify_message(const char * const source, const char * const message, int win);
 
 void
 notifier_init(void)
@@ -80,16 +81,7 @@ notify_invite(const char * const from, const char * const room,
 
     _notify(message->str, 10000, "Incoming message");
 
-    g_string_free(message, TRUE);
-}
-
-void
-notify_message(const char * const handle, int win)
-{
-    char message[strlen(handle) + 1 + 14];
-    sprintf(message, "%s: message (%d).", handle, win);
-
-    _notify(message, 10000, "incoming message");
+    g_string_free(message, FALSE);
 }
 
 void
@@ -102,7 +94,7 @@ notify_room_message(const char * const handle, const char * const room, int win)
 
     _notify(text->str, 10000, "incoming message");
 
-    g_string_free(text, TRUE);
+    g_string_free(text, FALSE);
 }
 
 void
@@ -111,7 +103,7 @@ notify_subscription(const char * const from)
     GString *message = g_string_new("Subscription request: \n");
     g_string_append(message, from);
     _notify(message->str, 10000, "Incomming message");
-    g_string_free(message, TRUE);
+    g_string_free(message, FALSE);
 }
 
 void
@@ -157,6 +149,60 @@ notify_remind(void)
     }
 
     g_string_free(text, TRUE);
+}
+
+void
+notify_message(const char * const handle, const char * const recvMessage, int win)
+{
+    GString *text = g_string_new("");
+    int receivedMessageLength = strlen(recvMessage);
+
+    if (g_utf8_validate(recvMessage, receivedMessageLength, NULL)) {
+        g_string_append_printf(text, "%.60s", recvMessage);
+
+        if (receivedMessageLength > 60) {
+            g_string_append(text, " (...)");
+        } else {
+            g_string_append(text, " (EOF)");
+        }
+
+    } else {
+        g_string_append(text, "<<gibberish non-UTF8 text>>");
+    }
+
+    _do_notify_message(handle, text->str, win);
+
+    g_string_free(text, TRUE);
+}
+
+static void _do_notify_message(
+    const char * const source, const char * const message, int win) {
+#ifdef HAVE_LIBNOTIFY
+    if (notify_is_initted()) {
+        GString *title = g_string_new("");
+        g_string_append(title, source);
+        g_string_append_printf(title, " (Profanity %d)", win);
+
+        NotifyNotification *notification =
+            notify_notification_new(title->str, message, NULL);
+        notify_notification_set_timeout(notification, 3000);
+        notify_notification_set_category(notification, "incoming message");
+        notify_notification_set_urgency(notification, NOTIFY_URGENCY_NORMAL);
+
+        GError *error = NULL;
+        gboolean notify_success = notify_notification_show(notification, &error);
+
+        if (!notify_success) {
+            log_error("Error sending desktop notification:");
+            log_error("  -> Message : %s", message);
+            log_error("  -> Error   : %s", error->message);
+        }
+
+        g_string_free(title, TRUE);
+    } else {
+        log_error("Libnotify initialisation error.");
+    }
+#endif
 }
 
 static void
