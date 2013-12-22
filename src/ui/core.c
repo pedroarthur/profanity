@@ -296,7 +296,7 @@ _ui_incoming_msg(const char * const from, const char * const message,
     if (prefs_get_boolean(PREF_BEEP))
         beep();
     if (prefs_get_boolean(PREF_NOTIFY_MESSAGE))
-        notify_message(display_from, ui_index);
+        notify_message(display_from, message, ui_index);
 
     free(display_from);
 
