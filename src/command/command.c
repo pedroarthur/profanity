@@ -1,7 +1,7 @@
 /*
  * command.c
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -41,6 +41,7 @@
 #include "jid.h"
 #include "log.h"
 #include "muc.h"
+#include "otr/otr.h"
 #include "profanity.h"
 #include "tools/autocomplete.h"
 #include "tools/parser.h"
@@ -55,7 +56,6 @@ static void _cmd_complete_parameters(char *input, int *size);
 
 static char * _sub_autocomplete(char *input, int *size);
 static char * _notify_autocomplete(char *input, int *size);
-static char * _titlebar_autocomplete(char *input, int *size);
 static char * _theme_autocomplete(char *input, int *size);
 static char * _autoaway_autocomplete(char *input, int *size);
 static char * _autoconnect_autocomplete(char *input, int *size);
@@ -64,6 +64,11 @@ static char * _who_autocomplete(char *input, int *size);
 static char * _roster_autocomplete(char *input, int *size);
 static char * _group_autocomplete(char *input, int *size);
 static char * _bookmark_autocomplete(char *input, int *size);
+static char * _otr_autocomplete(char *input, int *size);
+static char * _connect_autocomplete(char *input, int *size);
+static char * _statuses_autocomplete(char *input, int *size);
+static char * _alias_autocomplete(char *input, int *size);
+static char * _join_autocomplete(char *input, int *size);
 
 GHashTable *commands = NULL;
 
@@ -74,12 +79,12 @@ static struct cmd_t command_defs[] =
 {
     { "/help",
         cmd_help, parse_args, 0, 1, NULL,
-        { "/help [area|command]", "Get help on using Profanity",
+        { "/help [area|command]", "Get help on using Profanity.",
         { "/help [area|command]",
           "-------------------------",
           "Use with no arguments to get a help summary.",
           "Supply an area to see help for commands related to specific features.",
-          "Supply a command (without the leading slash) to see help on that command.",
+          "Supply a command (without the leading slash) to see help for that command.",
           "",
           "Example : /help commands",
           "Example : /help presence",
@@ -90,23 +95,27 @@ static struct cmd_t command_defs[] =
 
     { "/about",
         cmd_about, parse_args, 0, 0, NULL,
-        { "/about", "About Profanity",
+        { "/about", "About Profanity.",
         { "/about",
           "------",
-          "Show versioning and license information.",
+          "Show version and license information.",
           NULL  } } },
 
     { "/connect",
-        cmd_connect, parse_args, 1, 2, NULL,
-        { "/connect account [server]", "Login to a chat service.",
-        { "/connect account [server]",
-          "-------------------------",
+        cmd_connect, parse_args, 1, 5, NULL,
+        { "/connect account [server value] [port value]", "Login to a chat service.",
+        { "/connect account [server value] [port value]",
+          "--------------------------------------------",
           "Connect to an XMPP service using the specified account.",
-          "Use the server argument for chat services hosted at a different domain to the 'domainpart' of the Jabber ID.",
-          "An account is automatically created if one does not exist.  See the /account command for more details.",
+          "Use the server property to specify a server if required.",
+          "Change the default port (5222, or 5223 for SSL) with the port property.",
+          "An account is automatically created if one does not exist.",
+          "See the /account command for more details.",
           "",
           "Example: /connect myuser@gmail.com",
-          "Example: /connect myuser@mycompany.com talk.google.com",
+          "Example: /connect myuser@mycompany.com server talk.google.com",
+          "Example: /connect bob@someplace port 5678",
+          "Example: /connect me@chatty server chatty.com port 5443",
           NULL  } } },
 
     { "/disconnect",
@@ -134,22 +143,22 @@ static struct cmd_t command_defs[] =
 
     { "/roster",
         cmd_roster, parse_args_with_freetext, 0, 3, NULL,
-        { "/roster [add|remove|nick] [jid] [handle]", "Manage your roster.",
-        { "/roster [add|remove|nick] [jid] [handle]",
-          "----------------------------------------",
+        { "/roster [add|remove|nick|clearnick] [jid] [nickname]", "Manage your roster.",
+        { "/roster [add|remove|nick|clearnick] [jid] [nickname]",
+          "----------------------------------------------------",
           "View, add to, and remove from your roster.",
           "Passing no arguments lists all contacts in your roster.",
-          "The 'add' command will add a new item, the jid is required, the handle is an optional nickname",
-          "The 'remove' command removes a contact, the jid is required.",
-          "The 'nick' command changes a contacts nickname, the jid is required,",
-          "if no handle is supplied, the current one is removed.",
+          "The 'add' command will add a new item, jid is required, nickname is optional.",
+          "The 'remove' command removes a contact, jid is required.",
+          "The 'nick' command changes a contacts nickname, both jid and nickname are required,",
+          "The 'clearnick' command removes the current nickname, jid is required.",
           "",
           "Example : /roster (show your roster)",
           "Example : /roster add someone@contacts.org (add the contact)",
           "Example : /roster add someone@contacts.org Buddy (add the contact with nickname 'Buddy')",
           "Example : /roster remove someone@contacts.org (remove the contact)",
           "Example : /roster nick myfriend@chat.org My Friend",
-          "Example : /roster nick kai@server.com (clears handle)",
+          "Example : /roster clearnick kai@server.com (clears nickname)",
           NULL } } },
 
     { "/group",
@@ -226,18 +235,19 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/join",
-        cmd_join, parse_args_with_freetext, 1, 2, NULL,
-        { "/join room[@server] [nick]", "Join a chat room.",
-        { "/join room[@server] [nick]",
-          "--------------------------",
+        cmd_join, parse_args, 1, 5, NULL,
+        { "/join room[@server] [nick value] [password value]", "Join a chat room.",
+        { "/join room[@server] [nick value] [password value]",
+          "-------------------------------------------------",
           "Join a chat room at the conference server.",
           "If nick is specified you will join with this nickname.",
-          "Otherwise the account preference 'muc.nick' will be used which is the localpart of your JID (before the @).",
+          "Otherwise the account preference 'muc.nick' will be used which by default is the localpart of your JID (before the @).",
           "If no server is supplied, the account preference 'muc.service' is used, which is 'conference.<domain-part>' by default.",
           "If the room doesn't exist, and the server allows it, a new one will be created.",
           "",
           "Example : /join jdev@conference.jabber.org",
-          "Example : /join jdev@conference.jabber.org mynick",
+          "Example : /join jdev@conference.jabber.org nick mynick",
+          "Example : /join private@conference.jabber.org nick mynick password mypassword",
           "Example : /join jdev (as user@jabber.org will join jdev@conference.jabber.org)",
           NULL } } },
 
@@ -435,7 +445,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/beep",
-        cmd_beep, parse_args, 1, 1, cons_beep_setting,
+        cmd_beep, parse_args, 1, 1, &cons_beep_setting,
         { "/beep on|off", "Terminal beep on new messages.",
         { "/beep on|off",
           "------------",
@@ -445,7 +455,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/notify",
-        cmd_notify, parse_args, 2, 2, cons_notify_setting,
+        cmd_notify, parse_args, 2, 2, &cons_notify_setting,
         { "/notify type value", "Control various desktop noficiations.",
         { "/notify type value",
           "------------------",
@@ -470,7 +480,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/flash",
-        cmd_flash, parse_args, 1, 1, cons_flash_setting,
+        cmd_flash, parse_args, 1, 1, &cons_flash_setting,
         { "/flash on|off", "Terminal flash on new messages.",
         { "/flash on|off",
           "-------------",
@@ -480,7 +490,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/intype",
-        cmd_intype, parse_args, 1, 1, cons_intype_setting,
+        cmd_intype, parse_args, 1, 1, &cons_intype_setting,
         { "/intype on|off", "Show when contact is typing.",
         { "/intype on|off",
           "--------------",
@@ -488,7 +498,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/splash",
-        cmd_splash, parse_args, 1, 1, cons_splash_setting,
+        cmd_splash, parse_args, 1, 1, &cons_splash_setting,
         { "/splash on|off", "Splash logo on startup and /about command.",
         { "/splash on|off",
           "--------------",
@@ -496,7 +506,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/autoconnect",
-        cmd_autoconnect, parse_args, 1, 2, cons_autoconnect_setting,
+        cmd_autoconnect, parse_args, 1, 2, &cons_autoconnect_setting,
         { "/autoconnect set|off [account]", "Set account to autoconnect with.",
         { "/autoconnect set|off [account]",
           "------------------------------",
@@ -517,16 +527,15 @@ static struct cmd_t command_defs[] =
           NULL  } } },
 
     { "/titlebar",
-        cmd_titlebar, parse_args, 2, 2, cons_titlebar_setting,
-        { "/titlebar property on|off", "Show various properties in the window title bar.",
-        { "/titlebar property on|off",
-          "-------------------------",
-          "Show various properties in the window title bar.",
-          "Currently The only supported property is 'version'.",
+        cmd_titlebar, parse_args, 1, 1, &cons_titlebar_setting,
+        { "/titlebar on|off", "Show information in the window title bar.",
+        { "/titlebar on|off",
+          "----------------",
+          "Show information in the window title bar.",
           NULL  } } },
 
     { "/mouse",
-        cmd_mouse, parse_args, 1, 1, cons_mouse_setting,
+        cmd_mouse, parse_args, 1, 1, &cons_mouse_setting,
         { "/mouse on|off", "Use profanity mouse handling.",
         { "/mouse on|off",
           "-------------",
@@ -538,9 +547,24 @@ static struct cmd_t command_defs[] =
           "The default is 'off'.",
           NULL } } },
 
+    { "/alias",
+        cmd_alias, parse_args_with_freetext, 1, 3, NULL,
+        { "/alias add|remove|list [name value]", "Add your own command aliases.",
+        { "/alias add|remove|list [name value]",
+          "-----------------------------------",
+          "Add, remove or show command aliases.",
+          "The alias will be available as a command",
+          "Example : /alias add friends /who online friends",
+          "Example : /alias add q /quit",
+          "Example : /alias a /away \"I'm in a meeting.\"",
+          "Example : /alias remove q",
+          "Example : /alias list",
+          "The above aliases will be available as /friends and /a",
+          NULL } } },
+
     { "/chlog",
-        cmd_chlog, parse_args, 1, 1, cons_chlog_setting,
-        { "/chlog on|off", "Chat logging to file",
+        cmd_chlog, parse_args, 1, 1, &cons_chlog_setting,
+        { "/chlog on|off", "Chat logging to file.",
         { "/chlog on|off",
           "-------------",
           "Switch chat logging on or off.",
@@ -550,8 +574,8 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/grlog",
-        cmd_grlog, parse_args, 1, 1, cons_grlog_setting,
-        { "/grlog on|off", "Chat logging of chat rooms to file",
+        cmd_grlog, parse_args, 1, 1, &cons_grlog_setting,
+        { "/grlog on|off", "Chat logging of chat rooms to file.",
         { "/grlog on|off",
           "-------------",
           "Switch chat room logging on or off.",
@@ -559,7 +583,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/states",
-        cmd_states, parse_args, 1, 1, cons_states_setting,
+        cmd_states, parse_args, 1, 1, &cons_states_setting,
         { "/states on|off", "Send chat states during a chat session.",
         { "/states on|off",
           "--------------",
@@ -567,8 +591,25 @@ static struct cmd_t command_defs[] =
           "Such as whether you have become inactive, or have closed the chat window.",
           NULL } } },
 
+    { "/otr",
+        cmd_otr, parse_args, 1, 2, NULL,
+        { "/otr gen|myfp|theirfp|start|end|trust|untrust|log|warn|libver", "Off The Record encryption commands.",
+        { "/otr gen|myfp|theirfp|start|end|trust|untrust|log|warn|libver",
+          "-------------------------------------------------------------",
+          "gen - Generate your private key.",
+          "myfp - Show your fingerprint.",
+          "theirfp - Show contacts fingerprint.",
+          "start <contact> - Start an OTR session with the contact, or the current recipient if in a chat window and no argument supplied.",
+          "end - End the current OTR session,",
+          "trust - Indicate that you have verified the contact's fingerprint.",
+          "untrust - Indicate the the contact's fingerprint is not verified,",
+          "log - How to log OTR messages, options are 'on', 'off' and 'redact', with redaction being the default.",
+          "warn - Show when unencrypted messaging is being used in the title bar, options are 'on' and 'off' with 'on' being the default.",
+          "libver - Show which version of the libotr library is being used.",
+          NULL } } },
+
     { "/outtype",
-        cmd_outtype, parse_args, 1, 1, cons_outtype_setting,
+        cmd_outtype, parse_args, 1, 1, &cons_outtype_setting,
         { "/outtype on|off", "Send typing notification to recipient.",
         { "/outtype on|off",
           "---------------",
@@ -577,7 +618,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/gone",
-        cmd_gone, parse_args, 1, 1, cons_gone_setting,
+        cmd_gone, parse_args, 1, 1, &cons_gone_setting,
         { "/gone minutes", "Send 'gone' state to recipient after a period.",
         { "/gone minutes",
           "-------------",
@@ -588,7 +629,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/history",
-        cmd_history, parse_args, 1, 1, cons_history_setting,
+        cmd_history, parse_args, 1, 1, &cons_history_setting,
         { "/history on|off", "Chat history in message windows.",
         { "/history on|off",
           "---------------",
@@ -597,7 +638,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/log",
-        cmd_log, parse_args, 2, 2, cons_log_setting,
+        cmd_log, parse_args, 2, 2, &cons_log_setting,
         { "/log maxsize value", "Manage system logging settings.",
         { "/log maxsize value",
           "------------------",
@@ -606,7 +647,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/reconnect",
-        cmd_reconnect, parse_args, 1, 1, cons_reconnect_setting,
+        cmd_reconnect, parse_args, 1, 1, &cons_reconnect_setting,
         { "/reconnect seconds", "Set reconnect interval.",
         { "/reconnect seconds",
           "------------------",
@@ -615,7 +656,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/autoping",
-        cmd_autoping, parse_args, 1, 1, cons_autoping_setting,
+        cmd_autoping, parse_args, 1, 1, &cons_autoping_setting,
         { "/autoping seconds", "Server ping interval.",
         { "/autoping seconds",
           "-----------------",
@@ -624,7 +665,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/autoaway",
-        cmd_autoaway, parse_args_with_freetext, 2, 2, cons_autoaway_setting,
+        cmd_autoaway, parse_args_with_freetext, 2, 2, &cons_autoaway_setting,
         { "/autoaway setting value", "Set auto idle/away properties.",
         { "/autoaway setting value",
           "-----------------------",
@@ -645,7 +686,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/priority",
-        cmd_priority, parse_args, 1, 1, cons_priority_setting,
+        cmd_priority, parse_args, 1, 1, &cons_priority_setting,
         { "/priority value", "Set priority for the current account.",
         { "/priority value",
           "---------------",
@@ -674,6 +715,7 @@ static struct cmd_t command_defs[] =
           "The set command may use one of the following for 'property'.",
           "jid              : The Jabber ID of the account, the account name will be used if this property is not set.",
           "server           : The chat server, if different to the domainpart of the JID.",
+          "port             : The port used for connecting if not the default (5222, or 5223 for SSL).",
           "status           : The presence status to use on login, use 'last' to use whatever your last status was.",
           "online|chat|away",
           "|xa|dnd          : Priority for the specified presence.",
@@ -686,8 +728,9 @@ static struct cmd_t command_defs[] =
           "password         : Clears the password for the account.",
           "",
           "Example : /account add work",
-          "        : /account set work jid myuser@mycompany.com",
-          "        : /account set work server talk.google.com",
+          "        : /account set work jid me@chatty",
+          "        : /account set work server talk.chat.com",
+          "        : /account set work port 5111",
           "        : /account set work resource desktop",
           "        : /account set work muc chatservice.mycompany.com",
           "        : /account set work nick dennis",
@@ -714,7 +757,7 @@ static struct cmd_t command_defs[] =
           NULL } } },
 
     { "/theme",
-        cmd_theme, parse_args, 1, 2, cons_theme_setting,
+        cmd_theme, parse_args, 1, 2, &cons_theme_setting,
         { "/theme command [theme-name]", "Change colour theme.",
         { "/theme command [theme-name]",
           "---------------------------",
@@ -730,13 +773,16 @@ static struct cmd_t command_defs[] =
 
 
     { "/statuses",
-        cmd_statuses, parse_args, 1, 1, cons_statuses_setting,
-        { "/statuses on|off", "Set notifications for status messages.",
-        { "/statuses on|off",
-          "----------------",
-          "Show status updates from contacts, such as online/offline/away etc.",
-          "When disabled, status updates are not displayed.",
-          "The default is 'on'.",
+        cmd_statuses, parse_args, 2, 2, &cons_statuses_setting,
+        { "/statuses console|chat|muc setting", "Set preferences for presence change messages.",
+        { "/statuses console|chat|muc setting",
+          "----------------------------------",
+          "Configure how presence changes are displayed in various windows.",
+          "Settings:",
+          "  all - Show all presence changes.",
+          "  online - Show only online/offline changes.",
+          "  none - Don't show any presence changes.",
+          "The default is 'all' for all windows.",
           NULL } } },
 
     { "/away",
@@ -817,6 +863,14 @@ static Autocomplete wins_ac;
 static Autocomplete roster_ac;
 static Autocomplete group_ac;
 static Autocomplete bookmark_ac;
+static Autocomplete otr_ac;
+static Autocomplete otr_log_ac;
+static Autocomplete connect_property_ac;
+static Autocomplete statuses_ac;
+static Autocomplete statuses_setting_ac;
+static Autocomplete alias_ac;
+static Autocomplete aliases_ac;
+static Autocomplete join_property_ac;
 
 /*
  * Initialise command autocompleter and history
@@ -827,6 +881,7 @@ cmd_init(void)
     log_info("Initialising commands");
 
     commands_ac = autocomplete_new();
+    aliases_ac = autocomplete_new();
 
     help_ac = autocomplete_new();
     autocomplete_add(help_ac, "commands");
@@ -852,6 +907,19 @@ cmd_init(void)
         // add to commands and help autocompleters
         autocomplete_add(commands_ac, pcmd->cmd);
         autocomplete_add(help_ac, pcmd->cmd+1);
+    }
+
+    // load aliases
+    GList *aliases = prefs_get_aliases();
+    GList *curr = aliases;
+    while (curr != NULL) {
+        ProfAlias *alias = curr->data;
+        GString *ac_alias = g_string_new("/");
+        g_string_append(ac_alias, alias->name);
+        autocomplete_add(commands_ac, ac_alias->str);
+        autocomplete_add(aliases_ac, alias->name);
+        g_string_free(ac_alias, TRUE);
+        curr = g_list_next(curr);
     }
 
     prefs_ac = autocomplete_new();
@@ -919,6 +987,7 @@ cmd_init(void)
     account_set_ac = autocomplete_new();
     autocomplete_add(account_set_ac, "jid");
     autocomplete_add(account_set_ac, "server");
+    autocomplete_add(account_set_ac, "port");
     autocomplete_add(account_set_ac, "status");
     autocomplete_add(account_set_ac, "online");
     autocomplete_add(account_set_ac, "chat");
@@ -944,6 +1013,7 @@ cmd_init(void)
     roster_ac = autocomplete_new();
     autocomplete_add(roster_ac, "add");
     autocomplete_add(roster_ac, "nick");
+    autocomplete_add(roster_ac, "clearnick");
     autocomplete_add(roster_ac, "remove");
 
     group_ac = autocomplete_new();
@@ -968,6 +1038,46 @@ cmd_init(void)
     autocomplete_add(bookmark_ac, "add");
     autocomplete_add(bookmark_ac, "list");
     autocomplete_add(bookmark_ac, "remove");
+
+    otr_ac = autocomplete_new();
+    autocomplete_add(otr_ac, "gen");
+    autocomplete_add(otr_ac, "start");
+    autocomplete_add(otr_ac, "end");
+    autocomplete_add(otr_ac, "myfp");
+    autocomplete_add(otr_ac, "theirfp");
+    autocomplete_add(otr_ac, "trust");
+    autocomplete_add(otr_ac, "untrust");
+    autocomplete_add(otr_ac, "log");
+    autocomplete_add(otr_ac, "warn");
+    autocomplete_add(otr_ac, "libver");
+
+    otr_log_ac = autocomplete_new();
+    autocomplete_add(otr_log_ac, "on");
+    autocomplete_add(otr_log_ac, "off");
+    autocomplete_add(otr_log_ac, "redact");
+
+    connect_property_ac = autocomplete_new();
+    autocomplete_add(connect_property_ac, "server");
+    autocomplete_add(connect_property_ac, "port");
+
+    join_property_ac = autocomplete_new();
+    autocomplete_add(join_property_ac, "nick");
+    autocomplete_add(join_property_ac, "password");
+
+    statuses_ac = autocomplete_new();
+    autocomplete_add(statuses_ac, "console");
+    autocomplete_add(statuses_ac, "chat");
+    autocomplete_add(statuses_ac, "muc");
+
+    statuses_setting_ac = autocomplete_new();
+    autocomplete_add(statuses_setting_ac, "all");
+    autocomplete_add(statuses_setting_ac, "online");
+    autocomplete_add(statuses_setting_ac, "none");
+
+    alias_ac = autocomplete_new();
+    autocomplete_add(alias_ac, "add");
+    autocomplete_add(alias_ac, "remove");
+    autocomplete_add(alias_ac, "list");
 
     cmd_history_init();
 }
@@ -999,6 +1109,56 @@ cmd_uninit(void)
     autocomplete_free(roster_ac);
     autocomplete_free(group_ac);
     autocomplete_free(bookmark_ac);
+    autocomplete_free(otr_ac);
+    autocomplete_free(otr_log_ac);
+    autocomplete_free(connect_property_ac);
+    autocomplete_free(statuses_ac);
+    autocomplete_free(statuses_setting_ac);
+    autocomplete_free(alias_ac);
+    autocomplete_free(aliases_ac);
+    autocomplete_free(join_property_ac);
+}
+
+gboolean
+cmd_exists(char *cmd)
+{
+    if (commands_ac == NULL) {
+        return FALSE;
+    } else {
+        return autocomplete_contains(commands_ac, cmd);
+    }
+}
+
+void
+cmd_autocomplete_add(char *value)
+{
+    if (commands_ac != NULL) {
+        autocomplete_add(commands_ac, value);
+    }
+}
+
+void
+cmd_autocomplete_remove(char *value)
+{
+    if (commands_ac != NULL) {
+        autocomplete_remove(commands_ac, value);
+    }
+}
+
+void
+cmd_alias_add(char *value)
+{
+    if (aliases_ac != NULL) {
+        autocomplete_add(aliases_ac, value);
+    }
+}
+
+void
+cmd_alias_remove(char *value)
+{
+    if (aliases_ac != NULL) {
+        autocomplete_remove(aliases_ac, value);
+    }
 }
 
 // Command autocompletion functions
@@ -1007,7 +1167,6 @@ cmd_autocomplete(char *input, int *size)
 {
     int i = 0;
     char *found = NULL;
-    char *auto_msg = NULL;
     char inp_cpy[*size];
 
     // autocomplete command
@@ -1018,8 +1177,7 @@ cmd_autocomplete(char *input, int *size)
         inp_cpy[i] = '\0';
         found = autocomplete_complete(commands_ac, inp_cpy);
         if (found != NULL) {
-            auto_msg = (char *) malloc(strlen(found) + 1);
-            strcpy(auto_msg, found);
+            char *auto_msg = strdup(found);
             inp_replace_input(input, auto_msg, size);
             free(auto_msg);
             free(found);
@@ -1072,6 +1230,14 @@ cmd_reset_autocomplete()
     autocomplete_reset(roster_ac);
     autocomplete_reset(group_ac);
     autocomplete_reset(bookmark_ac);
+    autocomplete_reset(otr_ac);
+    autocomplete_reset(otr_log_ac);
+    autocomplete_reset(connect_property_ac);
+    autocomplete_reset(statuses_ac);
+    autocomplete_reset(statuses_setting_ac);
+    autocomplete_reset(alias_ac);
+    autocomplete_reset(aliases_ac);
+    autocomplete_reset(join_property_ac);
     bookmark_autocomplete_reset();
 }
 
@@ -1086,7 +1252,7 @@ cmd_execute(const char * const command, const char * const inp)
         gchar **args = cmd->parser(inp, cmd->min_args, cmd->max_args);
         if ((args == NULL) && (cmd->setting_func != NULL)) {
             cons_show("");
-            cmd->setting_func();
+            (*cmd->setting_func)();
             cons_show("Usage: %s", cmd->help.usage);
             return TRUE;
         } else if (args == NULL) {
@@ -1104,7 +1270,33 @@ cmd_execute(const char * const command, const char * const inp)
             return result;
         }
     } else {
-        return cmd_execute_default(inp);
+        gboolean ran_alias = FALSE;
+        gboolean alias_result = cmd_execute_alias(inp, &ran_alias);
+        if (!ran_alias) {
+            return cmd_execute_default(inp);
+        } else {
+            return alias_result;
+        }
+    }
+}
+
+gboolean
+cmd_execute_alias(const char * const inp, gboolean *ran)
+{
+    if (inp[0] != '/') {
+        ran = FALSE;
+        return TRUE;
+    } else {
+        char *alias = strdup(inp+1);
+        char *value = prefs_get_alias(alias);
+        free(alias);
+        if (value != NULL) {
+            *ran = TRUE;
+            return process_input(value);
+        } else {
+            *ran = FALSE;
+            return TRUE;
+        }
     }
 }
 
@@ -1129,8 +1321,40 @@ cmd_execute_default(const char * const inp)
             if (status != JABBER_CONNECTED) {
                 ui_current_print_line("You are not currently connected.");
             } else {
-                message_send(inp, recipient);
+#ifdef HAVE_LIBOTR
+                if (otr_is_secure(recipient)) {
+                    char *encrypted = otr_encrypt_message(recipient, inp);
+                    if (encrypted != NULL) {
+                        message_send(encrypted, recipient);
+                        otr_free_message(encrypted);
+                        if (prefs_get_boolean(PREF_CHLOG)) {
+                            const char *jid = jabber_get_fulljid();
+                            Jid *jidp = jid_create(jid);
+                            if (strcmp(prefs_get_string(PREF_OTR_LOG), "on") == 0) {
+                                chat_log_chat(jidp->barejid, recipient, inp, PROF_OUT_LOG, NULL);
+                            } else if (strcmp(prefs_get_string(PREF_OTR_LOG), "redact") == 0) {
+                                chat_log_chat(jidp->barejid, recipient, "[redacted]", PROF_OUT_LOG, NULL);
+                            }
+                            jid_destroy(jidp);
+                        }
 
+                        ui_outgoing_msg("me", recipient, inp);
+                    } else {
+                        cons_show_error("Failed to send message.");
+                    }
+                } else {
+                    message_send(inp, recipient);
+                    if (prefs_get_boolean(PREF_CHLOG)) {
+                        const char *jid = jabber_get_fulljid();
+                        Jid *jidp = jid_create(jid);
+                        chat_log_chat(jidp->barejid, recipient, inp, PROF_OUT_LOG, NULL);
+                        jid_destroy(jidp);
+                    }
+
+                    ui_outgoing_msg("me", recipient, inp);
+                }
+#else
+                message_send(inp, recipient);
                 if (prefs_get_boolean(PREF_CHLOG)) {
                     const char *jid = jabber_get_fulljid();
                     Jid *jidp = jid_create(jid);
@@ -1139,6 +1363,7 @@ cmd_execute_default(const char * const inp)
                 }
 
                 ui_outgoing_msg("me", recipient, inp);
+#endif
             }
             break;
 
@@ -1179,8 +1404,8 @@ _cmd_complete_parameters(char *input, int *size)
 
     // autocomplete boolean settings
     gchar *boolean_choices[] = { "/beep", "/intype", "/states", "/outtype",
-        "/flash", "/splash", "/chlog", "/grlog", "/mouse", "/history",
-        "/vercheck", "/statuses" };
+        "/flash", "/splash", "/chlog", "/grlog", "/mouse", "/history", "/titlebar",
+        "/vercheck" };
 
     for (i = 0; i < ARRAY_SIZE(boolean_choices); i++) {
         result = autocomplete_param_with_func(input, size, boolean_choices[i],
@@ -1253,20 +1478,6 @@ _cmd_complete_parameters(char *input, int *size)
         }
     }
 
-    result = autocomplete_param_with_func(input, size, "/join", bookmark_find);
-    if (result != NULL) {
-        inp_replace_input(input, result, size);
-        g_free(result);
-        return;
-    }
-
-    result = autocomplete_param_with_func(input, size, "/connect", accounts_find_enabled);
-    if (result != NULL) {
-        inp_replace_input(input, result, size);
-        g_free(result);
-        return;
-    }
-
     gchar *cmds[] = { "/help", "/prefs", "/log", "/disco", "/close", "/wins" };
     Autocomplete completers[] = { help_ac, prefs_ac, log_ac, disco_ac, close_ac, wins_ac };
 
@@ -1280,9 +1491,11 @@ _cmd_complete_parameters(char *input, int *size)
     }
 
     autocompleter acs[] = { _who_autocomplete, _sub_autocomplete, _notify_autocomplete,
-        _autoaway_autocomplete, _titlebar_autocomplete, _theme_autocomplete,
+        _autoaway_autocomplete, _theme_autocomplete,
         _account_autocomplete, _roster_autocomplete, _group_autocomplete,
-        _bookmark_autocomplete, _autoconnect_autocomplete };
+        _bookmark_autocomplete, _autoconnect_autocomplete, _otr_autocomplete,
+        _connect_autocomplete, _statuses_autocomplete, _alias_autocomplete,
+        _join_autocomplete };
 
     for (i = 0; i < ARRAY_SIZE(acs); i++) {
         result = acs[i](input, size);
@@ -1345,6 +1558,10 @@ _roster_autocomplete(char *input, int *size)
 {
     char *result = NULL;
     result = autocomplete_param_with_func(input, size, "/roster nick", roster_find_jid);
+    if (result != NULL) {
+        return result;
+    }
+    result = autocomplete_param_with_func(input, size, "/roster clearnick", roster_find_jid);
     if (result != NULL) {
         return result;
     }
@@ -1446,23 +1663,6 @@ _notify_autocomplete(char *input, int *size)
 }
 
 static char *
-_titlebar_autocomplete(char *input, int *size)
-{
-    char *result = NULL;
-    result = autocomplete_param_with_func(input, size, "/titlebar version",
-        prefs_autocomplete_boolean_choice);
-    if (result != NULL) {
-        return result;
-    }
-    result = autocomplete_param_with_ac(input, size, "/titlebar", titlebar_ac);
-    if (result != NULL) {
-        return result;
-    }
-
-    return NULL;
-}
-
-static char *
 _autoaway_autocomplete(char *input, int *size)
 {
     char *result = NULL;
@@ -1503,6 +1703,35 @@ _autoconnect_autocomplete(char *input, int *size)
 }
 
 static char *
+_otr_autocomplete(char *input, int *size)
+{
+    char *result = NULL;
+
+    result = autocomplete_param_with_func(input, size, "/otr start", roster_find_contact);
+    if (result != NULL) {
+        return result;
+    }
+
+    result = autocomplete_param_with_ac(input, size, "/otr log", otr_log_ac);
+    if (result != NULL) {
+        return result;
+    }
+
+    result = autocomplete_param_with_func(input, size, "/otr warn",
+        prefs_autocomplete_boolean_choice);
+    if (result != NULL) {
+        return result;
+    }
+
+    result = autocomplete_param_with_ac(input, size, "/otr", otr_ac);
+    if (result != NULL) {
+        return result;
+    }
+
+    return NULL;
+}
+
+static char *
 _theme_autocomplete(char *input, int *size)
 {
     char *result = NULL;
@@ -1525,6 +1754,111 @@ _theme_autocomplete(char *input, int *size)
     result = autocomplete_param_with_ac(input, size, "/theme", theme_ac);
     if (result != NULL) {
         return result;
+    }
+
+    return NULL;
+}
+
+static char *
+_statuses_autocomplete(char *input, int *size)
+{
+    char *result = NULL;
+
+    result = autocomplete_param_with_ac(input, size, "/statuses console", statuses_setting_ac);
+    if (result != NULL) {
+        return result;
+    }
+
+    result = autocomplete_param_with_ac(input, size, "/statuses chat", statuses_setting_ac);
+    if (result != NULL) {
+        return result;
+    }
+
+    result = autocomplete_param_with_ac(input, size, "/statuses muc", statuses_setting_ac);
+    if (result != NULL) {
+        return result;
+    }
+
+    result = autocomplete_param_with_ac(input, size, "/statuses", statuses_ac);
+    if (result != NULL) {
+        return result;
+    }
+
+    return NULL;
+}
+
+static char *
+_alias_autocomplete(char *input, int *size)
+{
+    char *result = NULL;
+
+    result = autocomplete_param_with_ac(input, size, "/alias remove", aliases_ac);
+    if (result != NULL) {
+        return result;
+    }
+
+    result = autocomplete_param_with_ac(input, size, "/alias", alias_ac);
+    if (result != NULL) {
+        return result;
+    }
+
+    return NULL;
+}
+
+static char *
+_connect_autocomplete(char *input, int *size)
+{
+    char *result = NULL;
+
+    input[*size] = '\0';
+    gchar **args = parse_args(input, 2, 4);
+
+    if ((strncmp(input, "/connect", 8) == 0) && (args != NULL)) {
+        GString *beginning = g_string_new("/connect ");
+        g_string_append(beginning, args[0]);
+        if (args[1] != NULL && args[2] != NULL) {
+            g_string_append(beginning, " ");
+            g_string_append(beginning, args[1]);
+            g_string_append(beginning, " ");
+            g_string_append(beginning, args[2]);
+        }
+        result = autocomplete_param_with_ac(input, size, beginning->str, connect_property_ac);
+        g_string_free(beginning, TRUE);
+        if (result != NULL) {
+            return result;
+        }
+    }
+
+    result = autocomplete_param_with_func(input, size, "/connect", accounts_find_enabled);
+    if (result != NULL) {
+        return result;
+    }
+
+    return NULL;
+}
+
+static char *
+_join_autocomplete(char *input, int *size)
+{
+    char *result = NULL;
+
+    input[*size] = '\0';
+    gchar **args = parse_args(input, 2, 4);
+
+    if ((strncmp(input, "/join", 5) == 0) && (args != NULL)) {
+        GString *beginning = g_string_new("/join ");
+        g_string_append(beginning, args[0]);
+        if (args[1] != NULL && args[2] != NULL) {
+            g_string_append(beginning, " ");
+            g_string_append(beginning, args[1]);
+            g_string_append(beginning, " ");
+            g_string_append(beginning, args[2]);
+        }
+        result = autocomplete_param_with_ac(input, size, beginning->str, join_property_ac);
+        g_string_free(beginning, TRUE);
+        if (result != NULL) {
+            return result;
+        }
     }
 
     return NULL;

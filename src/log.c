@@ -1,7 +1,7 @@
 /*
  * log.c
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -62,6 +62,7 @@ static char * _get_groupchat_log_filename(const char * const room,
 static gchar * _get_chatlog_dir(void);
 static gchar * _get_log_file(void);
 static void _rotate_log_file(void);
+static char* _log_string_from_level(log_level_t level);
 
 void
 log_debug(const char * const msg, ...)
@@ -131,18 +132,23 @@ void
 log_close(void)
 {
     g_time_zone_unref(tz);
-    fclose(logp);
+    if (logp != NULL) {
+        fclose(logp);
+    }
 }
 
 void
 log_msg(log_level_t level, const char * const area, const char * const msg)
 {
-    if (level >= level_filter) {
+    if (level >= level_filter && logp != NULL) {
         long result;
         dt = g_date_time_new_now(tz);
 
+        char *level_str = _log_string_from_level(level);
+
         gchar *date_fmt = g_date_time_format(dt, "%d/%m/%Y %H:%M:%S");
-        fprintf(logp, "%s: %s: %s\n", date_fmt, area, msg);
+
+        fprintf(logp, "%s: %s: %s: %s\n", date_fmt, area, level_str, msg);
         g_date_time_unref(dt);
 
         fflush(logp);
@@ -238,24 +244,25 @@ chat_log_chat(const gchar * const login, gchar *other,
     date_fmt = g_date_time_format(dt, "%H:%M:%S");
 
     FILE *logp = fopen(dated_log->filename, "a");
-
-    if (direction == PROF_IN_LOG) {
-        if (strncmp(msg, "/me ", 4) == 0) {
-            fprintf(logp, "%s - *%s %s\n", date_fmt, other, msg + 4);
+    if (logp != NULL) {
+        if (direction == PROF_IN_LOG) {
+            if (strncmp(msg, "/me ", 4) == 0) {
+                fprintf(logp, "%s - *%s %s\n", date_fmt, other, msg + 4);
+            } else {
+                fprintf(logp, "%s - %s: %s\n", date_fmt, other, msg);
+            }
         } else {
-            fprintf(logp, "%s - %s: %s\n", date_fmt, other, msg);
+            if (strncmp(msg, "/me ", 4) == 0) {
+                fprintf(logp, "%s - *me %s\n", date_fmt, msg + 4);
+            } else {
+                fprintf(logp, "%s - me: %s\n", date_fmt, msg);
+            }
         }
-    } else {
-        if (strncmp(msg, "/me ", 4) == 0) {
-            fprintf(logp, "%s - *me %s\n", date_fmt, msg + 4);
-        } else {
-            fprintf(logp, "%s - me: %s\n", date_fmt, msg);
+        fflush(logp);
+        int result = fclose(logp);
+        if (result == EOF) {
+            log_error("Error closing file %s, errno = %d", dated_log->filename, errno);
         }
-    }
-    fflush(logp);
-    int result = fclose(logp);
-    if (result == EOF) {
-        log_error("Error closing file %s, errno = %d", dated_log->filename, errno);
     }
 
     g_free(date_fmt);
@@ -285,17 +292,18 @@ groupchat_log_chat(const gchar * const login, const gchar * const room,
     gchar *date_fmt = g_date_time_format(dt, "%H:%M:%S");
 
     FILE *logp = fopen(dated_log->filename, "a");
+    if (logp != NULL) {
+        if (strncmp(msg, "/me ", 4) == 0) {
+            fprintf(logp, "%s - *%s %s\n", date_fmt, nick, msg + 4);
+        } else {
+            fprintf(logp, "%s - %s: %s\n", date_fmt, nick, msg);
+        }
 
-    if (strncmp(msg, "/me ", 4) == 0) {
-        fprintf(logp, "%s - *%s %s\n", date_fmt, nick, msg + 4);
-    } else {
-        fprintf(logp, "%s - %s: %s\n", date_fmt, nick, msg);
-    }
-
-    fflush(logp);
-    int result = fclose(logp);
-    if (result == EOF) {
-        log_error("Error closing file %s, errno = %d", dated_log->filename, errno);
+        fflush(logp);
+        int result = fclose(logp);
+        if (result == EOF) {
+            log_error("Error closing file %s, errno = %d", dated_log->filename, errno);
+        }
     }
 
     g_free(date_fmt);
@@ -518,4 +526,22 @@ _get_log_file(void)
     g_string_free(logfile, TRUE);
 
     return result;
+}
+
+static char*
+_log_string_from_level(log_level_t level)
+{
+    switch (level)
+    {
+        case PROF_LEVEL_ERROR:
+            return "ERR";
+        case PROF_LEVEL_WARN:
+            return "WRN";
+        case PROF_LEVEL_INFO:
+            return "INF";
+        case PROF_LEVEL_DEBUG:
+            return "DBG";
+        default:
+            return "LOG";
+    }
 }

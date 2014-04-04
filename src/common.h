@@ -1,7 +1,7 @@
 /*
  * common.h
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -77,7 +77,6 @@ gboolean mkdir_recursive(const char *dir);
 char * str_replace(const char *string, const char *substr,
     const char *replacement);
 int str_contains(char str[], int size, char ch);
-char* encode_xml(const char * const xml);
 char * prof_getline(FILE *stream);
 char* release_get_latest(void);
 gboolean release_is_new(char *found_version);
@@ -89,7 +88,7 @@ const char * string_from_resource_presence(resource_presence_t presence);
 resource_presence_t resource_presence_from_string(const char * const str);
 contact_presence_t contact_presence_from_resource_presence(resource_presence_t resource_presence);
 
-char * get_unique_id(void);
+char * generate_unique_id(char *prefix);
 
 int cmp_win_num(gconstpointer a, gconstpointer b);
 int get_next_available_win_num(GList *used);

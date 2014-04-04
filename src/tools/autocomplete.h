@@ -1,7 +1,7 @@
 /*
  * autocomplete.h
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -56,4 +56,6 @@ char * autocomplete_param_no_with_func(char *input, int *size, char *command,
     int arg_number, autocomplete_func func);
 
 void autocomplete_reset(Autocomplete ac);
+
+gboolean autocomplete_contains(Autocomplete ac, const char *value);
 #endif

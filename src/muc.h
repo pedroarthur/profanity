@@ -1,7 +1,7 @@
 /*
  * muc.h
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -30,9 +30,10 @@
 #include "tools/autocomplete.h"
 
 void muc_init(void);
+void muc_close(void);
 void muc_join_room(const char * const room, const char * const nick);
 void muc_leave_room(const char * const room);
-gboolean muc_room_is_active(Jid *jid);
+gboolean muc_room_is_active(const char * const room);
 GList* muc_get_active_room_list(void);
 char * muc_get_room_nick(const char * const room);
 

@@ -1,7 +1,7 @@
 /*
  * muc.c
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -52,6 +52,16 @@ void
 muc_init(void)
 {
     invite_ac = autocomplete_new();
+}
+
+void
+muc_close(void)
+{
+    autocomplete_free(invite_ac);
+    if (rooms != NULL) {
+        g_hash_table_destroy(rooms);
+        rooms = NULL;
+    }
 }
 
 void
@@ -154,10 +164,10 @@ muc_leave_room(const char * const room)
  * Returns TRUE if the user is currently in the room
  */
 gboolean
-muc_room_is_active(Jid *jid)
+muc_room_is_active(const char * const room)
 {
     if (rooms != NULL) {
-        ChatRoom *chat_room = g_hash_table_lookup(rooms, jid->barejid);
+        ChatRoom *chat_room = g_hash_table_lookup(rooms, room);
 
         if (chat_room != NULL) {
             return TRUE;

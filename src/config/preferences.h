@@ -1,7 +1,7 @@
 /*
  * preferences.h
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -40,12 +40,15 @@ typedef enum {
     PREF_BEEP,
     PREF_VERCHECK,
     PREF_THEME,
-    PREF_TITLEBARVERSION,
+    PREF_TITLEBAR,
     PREF_FLASH,
     PREF_INTYPE,
     PREF_HISTORY,
     PREF_MOUSE,
     PREF_STATUSES,
+    PREF_STATUSES_CONSOLE,
+    PREF_STATUSES_CHAT,
+    PREF_STATUSES_MUC,
     PREF_STATES,
     PREF_OUTTYPE,
     PREF_NOTIFY_TYPING,
@@ -57,8 +60,15 @@ typedef enum {
     PREF_AUTOAWAY_CHECK,
     PREF_AUTOAWAY_MODE,
     PREF_AUTOAWAY_MESSAGE,
-    PREF_CONNECT_ACCOUNT
+    PREF_CONNECT_ACCOUNT,
+    PREF_OTR_LOG,
+    PREF_OTR_WARN
 } preference_t;
+
+typedef struct prof_alias_t {
+    gchar *name;
+    gchar *value;
+} ProfAlias;
 
 void prefs_load(void);
 void prefs_close(void);
@@ -86,6 +96,12 @@ gint prefs_get_autoaway_time(void);
 void prefs_set_autoaway_time(gint value);
 
 void prefs_add_login(const char *jid);
+
+gboolean prefs_add_alias(const char * const name, const char * const value);
+gboolean prefs_remove_alias(const char * const name);
+char* prefs_get_alias(const char * const name);
+GList* prefs_get_aliases(void);
+void prefs_free_aliases(GList *aliases);
 
 gboolean prefs_get_boolean(preference_t pref);
 void prefs_set_boolean(preference_t pref, gboolean value);

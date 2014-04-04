@@ -1,7 +1,7 @@
 /*
  * window.c
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -24,6 +24,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 #include <glib.h>
 #ifdef HAVE_NCURSESW_NCURSES_H
@@ -34,11 +35,8 @@
 
 #include "config/theme.h"
 #include "ui/window.h"
-#include "ui/muc_window.h"
 
-static gboolean _default_handle_error_message(ProfWin *self, const char * const from,
-    const char * const err_msg);
-static void _print_incoming_message(ProfWin *self, GTimeVal *tv_stamp,
+static void _win_chat_print_incoming_message(ProfWin *window, GTimeVal *tv_stamp,
     const char * const from, const char * const message);
 
 ProfWin*
@@ -53,35 +51,8 @@ win_create(const char * const title, int cols, win_type_t type)
     new_win->unread = 0;
     new_win->history_shown = 0;
     new_win->type = type;
-
-    switch (new_win->type)
-    {
-        case WIN_CONSOLE:
-            new_win->handle_error_message = _default_handle_error_message;
-            new_win->print_incoming_message = NULL;
-            break;
-        case WIN_CHAT:
-            new_win->handle_error_message = _default_handle_error_message;
-            new_win->print_incoming_message = _print_incoming_message;
-            break;
-        case WIN_MUC:
-            new_win->handle_error_message = muc_handle_error_message;
-            new_win->print_incoming_message = NULL;
-            break;
-        case WIN_PRIVATE:
-            new_win->handle_error_message = _default_handle_error_message;
-            new_win->print_incoming_message = _print_incoming_message;
-            break;
-        case WIN_DUCK:
-            new_win->handle_error_message = _default_handle_error_message;
-            new_win->print_incoming_message = NULL;
-            break;
-        default:
-            new_win->handle_error_message = _default_handle_error_message;
-            new_win->print_incoming_message = NULL;
-            break;
-    }
-
+    new_win->is_otr = FALSE;
+    new_win->is_trusted = FALSE;
     scrollok(new_win->win, TRUE);
 
     return new_win;
@@ -110,6 +81,16 @@ win_print_time(ProfWin* window, char show_char)
 
 void
 win_print_line(ProfWin *window, const char show_char, int attrs,
+    const char * const msg)
+{
+    win_print_time(window, show_char);
+    wattron(window->win, attrs);
+    wprintw(window->win, "%s\n", msg);
+    wattroff(window->win, attrs);
+}
+
+void
+win_vprint_line(ProfWin *window, const char show_char, int attrs,
     const char * const msg, ...)
 {
     va_list arg;
@@ -125,15 +106,15 @@ win_print_line(ProfWin *window, const char show_char, int attrs,
 }
 
 void
-win_refresh(ProfWin *window)
+win_update_virtual(ProfWin *window)
 {
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
-    prefresh(window->win, window->y_pos, 0, 1, 0, rows-3, cols-1);
+    pnoutrefresh(window->win, window->y_pos, 0, 1, 0, rows-3, cols-1);
 }
 
 void
-win_page_off(ProfWin *window)
+win_move_to_end(ProfWin *window)
 {
     window->paged = 0;
 
@@ -314,40 +295,49 @@ win_show_status_string(ProfWin *window, const char * const from,
     }
 }
 
-static gboolean
-_default_handle_error_message(ProfWin *self, const char * const from,
-    const char * const err_msg)
+void
+win_print_incoming_message(ProfWin *window, GTimeVal *tv_stamp,
+    const char * const from, const char * const message)
 {
-    return FALSE;
+    switch (window->type)
+    {
+        case WIN_CHAT:
+        case WIN_PRIVATE:
+            _win_chat_print_incoming_message(window, tv_stamp, from, message);
+            break;
+        default:
+            assert(FALSE);
+            break;
+    }
 }
 
 static void
-_print_incoming_message(ProfWin *self, GTimeVal *tv_stamp,
+_win_chat_print_incoming_message(ProfWin *window, GTimeVal *tv_stamp,
     const char * const from, const char * const message)
 {
     if (tv_stamp == NULL) {
-        win_print_time(self, '-');
+        win_print_time(window, '-');
     } else {
         GDateTime *time = g_date_time_new_from_timeval_utc(tv_stamp);
         gchar *date_fmt = g_date_time_format(time, "%H:%M:%S");
-        wattron(self->win, COLOUR_TIME);
-        wprintw(self->win, "%s - ", date_fmt);
-        wattroff(self->win, COLOUR_TIME);
+        wattron(window->win, COLOUR_TIME);
+        wprintw(window->win, "%s - ", date_fmt);
+        wattroff(window->win, COLOUR_TIME);
         g_date_time_unref(time);
         g_free(date_fmt);
     }
 
     if (strncmp(message, "/me ", 4) == 0) {
-        wattron(self->win, COLOUR_THEM);
-        wprintw(self->win, "*%s ", from);
-        waddstr(self->win, message + 4);
-        wprintw(self->win, "\n");
-        wattroff(self->win, COLOUR_THEM);
+        wattron(window->win, COLOUR_THEM);
+        wprintw(window->win, "*%s ", from);
+        waddstr(window->win, message + 4);
+        wprintw(window->win, "\n");
+        wattroff(window->win, COLOUR_THEM);
     } else {
-        wattron(self->win, COLOUR_THEM);
-        wprintw(self->win, "%s: ", from);
-        wattroff(self->win, COLOUR_THEM);
-        waddstr(self->win, message);
-        wprintw(self->win, "\n");
+        wattron(window->win, COLOUR_THEM);
+        wprintw(window->win, "%s: ", from);
+        wattroff(window->win, COLOUR_THEM);
+        waddstr(window->win, message);
+        wprintw(window->win, "\n");
     }
 }

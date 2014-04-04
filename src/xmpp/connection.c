@@ -1,7 +1,7 @@
 /*
  * connection.c
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -33,6 +33,7 @@
 #include "log.h"
 #include "muc.h"
 #include "profanity.h"
+#include "server_events.h"
 #include "xmpp/bookmark.h"
 #include "xmpp/capabilities.h"
 #include "xmpp/connection.h"
@@ -67,6 +68,7 @@ static struct {
     char *jid;
     char *passwd;
     char *altdomain;
+    int port;
 } saved_details;
 
 static GTimer *reconnect_timer;
@@ -79,20 +81,19 @@ static void _xmpp_file_logger(void * const userdata,
 static xmpp_log_t * _xmpp_get_file_logger();
 
 static jabber_conn_status_t _jabber_connect(const char * const fulljid,
-    const char * const passwd, const char * const altdomain);
+    const char * const passwd, const char * const altdomain, int port);
 static void _jabber_reconnect(void);
 
 static void _connection_handler(xmpp_conn_t * const conn,
     const xmpp_conn_event_t status, const int error,
     xmpp_stream_error_t * const stream_error, void * const userdata);
-static int _ping_timed_handler(xmpp_conn_t * const conn, void * const userdata);
 
 void _connection_free_saved_account(void);
 void _connection_free_saved_details(void);
 void _connection_free_session_data(void);
 
-void
-jabber_init(const int disable_tls)
+static void
+_jabber_init(const int disable_tls)
 {
     log_info("Initialising XMPP");
     jabber_conn.conn_status = JABBER_STARTED;
@@ -108,8 +109,8 @@ jabber_init(const int disable_tls)
     xmpp_initialize();
 }
 
-jabber_conn_status_t
-jabber_connect_with_account(const ProfAccount * const account)
+static jabber_conn_status_t
+_jabber_connect_with_account(const ProfAccount * const account)
 {
     assert(account != NULL);
 
@@ -122,15 +123,15 @@ jabber_connect_with_account(const ProfAccount * const account)
     // connect with fulljid
     Jid *jidp = jid_create_from_bare_and_resource(account->jid, account->resource);
     jabber_conn_status_t result =
-      _jabber_connect(jidp->fulljid, account->password, account->server);
+      _jabber_connect(jidp->fulljid, account->password, account->server, account->port);
     jid_destroy(jidp);
 
     return result;
 }
 
-jabber_conn_status_t
-jabber_connect_with_details(const char * const jid,
-    const char * const passwd, const char * const altdomain)
+static jabber_conn_status_t
+_jabber_connect_with_details(const char * const jid,
+    const char * const passwd, const char * const altdomain, const int port)
 {
     assert(jid != NULL);
     assert(passwd != NULL);
@@ -142,6 +143,11 @@ jabber_connect_with_details(const char * const jid,
         saved_details.altdomain = strdup(altdomain);
     } else {
         saved_details.altdomain = NULL;
+    }
+    if (port != 0) {
+        saved_details.port = port;
+    } else {
+        saved_details.port = 0;
     }
 
     // use 'profanity' when no resourcepart in provided jid
@@ -157,11 +163,11 @@ jabber_connect_with_details(const char * const jid,
 
     // connect with fulljid
     log_info("Connecting without account, JID: %s", saved_details.jid);
-    return _jabber_connect(saved_details.jid, passwd, saved_details.altdomain);
+    return _jabber_connect(saved_details.jid, passwd, saved_details.altdomain, saved_details.port);
 }
 
-void
-jabber_disconnect(void)
+static void
+_jabber_disconnect(void)
 {
     // if connected, send end stream and wait for response
     if (jabber_conn.conn_status == JABBER_CONNECTED) {
@@ -190,14 +196,14 @@ jabber_disconnect(void)
     FREE_SET_NULL(jabber_conn.domain);
 }
 
-void
-jabber_shutdown(void)
+static void
+_jabber_shutdown(void)
 {
     xmpp_shutdown();
 }
 
-void
-jabber_process_events(void)
+static void
+_jabber_process_events(void)
 {
     // run xmpp event loop if connected, connecting or disconnecting
     if (jabber_conn.conn_status == JABBER_CONNECTED
@@ -217,28 +223,14 @@ jabber_process_events(void)
 
 }
 
-void
-jabber_set_autoping(const int seconds)
-{
-    if (jabber_conn.conn_status == JABBER_CONNECTED) {
-        xmpp_timed_handler_delete(jabber_conn.conn, _ping_timed_handler);
-
-        if (seconds != 0) {
-            int millis = seconds * 1000;
-            xmpp_timed_handler_add(jabber_conn.conn, _ping_timed_handler, millis,
-                jabber_conn.ctx);
-        }
-    }
-}
-
-GList *
-jabber_get_available_resources(void)
+static GList *
+_jabber_get_available_resources(void)
 {
     return g_hash_table_get_values(available_resources);
 }
 
-jabber_conn_status_t
-jabber_get_connection_status(void)
+static jabber_conn_status_t
+_jabber_get_connection_status(void)
 {
     return (jabber_conn.conn_status);
 }
@@ -255,26 +247,26 @@ connection_get_ctx(void)
     return jabber_conn.ctx;
 }
 
-const char *
-jabber_get_fulljid(void)
+static const char *
+_jabber_get_fulljid(void)
 {
     return xmpp_conn_get_jid(jabber_conn.conn);
 }
 
-const char *
-jabber_get_domain(void)
+static const char *
+_jabber_get_domain(void)
 {
     return jabber_conn.domain;
 }
 
-char *
-jabber_get_presence_message(void)
+static char *
+_jabber_get_presence_message(void)
 {
     return jabber_conn.presence_message;
 }
 
-char *
-jabber_get_account_name(void)
+static char *
+_jabber_get_account_name(void)
 {
     return saved_account.name;
 }
@@ -330,53 +322,9 @@ _connection_free_session_data(void)
     presence_clear_sub_requests();
 }
 
-int
-connection_error_handler(xmpp_conn_t * const conn, xmpp_stanza_t * const stanza,
-    void * const userdata)
-{
-    xmpp_ctx_t *ctx = connection_get_ctx();
-    gchar *err_msg = NULL;
-    gchar *from = xmpp_stanza_get_attribute(stanza, STANZA_ATTR_FROM);
-    xmpp_stanza_t *error_stanza = xmpp_stanza_get_child_by_name(stanza, STANZA_NAME_ERROR);
-        xmpp_stanza_t *text_stanza =
-            xmpp_stanza_get_child_by_name(error_stanza, STANZA_NAME_TEXT);
-
-    if (error_stanza == NULL) {
-        log_debug("error message without <error/> received");
-    } else {
-
-        // check for text
-        if (text_stanza != NULL) {
-            err_msg = xmpp_stanza_get_text(text_stanza);
-            if (err_msg != NULL) {
-                prof_handle_error_message(from, err_msg);
-                xmpp_free(ctx, err_msg);
-            }
-
-            // TODO : process 'type' attribute from <error/> [RFC6120, 8.3.2]
-
-        // otherwise show defined-condition
-        } else {
-            xmpp_stanza_t *err_cond = xmpp_stanza_get_children(error_stanza);
-
-            if (err_cond == NULL) {
-                log_debug("error message without <defined-condition/> or <text/> received");
-
-            } else {
-                err_msg = xmpp_stanza_get_name(err_cond);
-                prof_handle_error_message(from, err_msg);
-
-                // TODO : process 'type' attribute from <error/> [RFC6120, 8.3.2]
-            }
-        }
-    }
-
-    return 1;
-}
-
 static jabber_conn_status_t
 _jabber_connect(const char * const fulljid, const char * const passwd,
-    const char * const altdomain)
+    const char * const altdomain, int port)
 {
     assert(fulljid != NULL);
     assert(passwd != NULL);
@@ -420,7 +368,7 @@ _jabber_connect(const char * const fulljid, const char * const passwd,
         xmpp_conn_disable_tls(jabber_conn.conn);
     }
 
-    int connect_status = xmpp_connect_client(jabber_conn.conn, altdomain, 0,
+    int connect_status = xmpp_connect_client(jabber_conn.conn, altdomain, port,
         _connection_handler, jabber_conn.ctx);
 
     if (connect_status == 0)
@@ -442,7 +390,7 @@ _jabber_reconnect(void)
     } else {
         char *fulljid = create_fulljid(account->jid, account->resource);
         log_debug("Attempting reconnect with account %s", account->name);
-        _jabber_connect(fulljid, saved_account.passwd, account->server);
+        _jabber_connect(fulljid, saved_account.passwd, account->server, account->port);
         free(fulljid);
         g_timer_start(reconnect_timer);
     }
@@ -453,8 +401,6 @@ _connection_handler(xmpp_conn_t * const conn,
     const xmpp_conn_event_t status, const int error,
     xmpp_stream_error_t * const stream_error, void * const userdata)
 {
-    xmpp_ctx_t *ctx = (xmpp_ctx_t *)userdata;
-
     // login success
     if (status == XMPP_CONN_CONNECT) {
         log_debug("Connection handler: XMPP_CONN_CONNECT");
@@ -462,15 +408,15 @@ _connection_handler(xmpp_conn_t * const conn,
         // logged in with account
         if (saved_account.name != NULL) {
             log_debug("Connection handler: logged in with account name: %s", saved_account.name);
-            prof_handle_login_account_success(saved_account.name);
+            handle_login_account_success(saved_account.name);
 
         // logged in without account, use details to create new account
         } else {
             log_debug("Connection handler: logged in with jid: %s", saved_details.name);
-            accounts_add(saved_details.name, saved_details.altdomain);
+            accounts_add(saved_details.name, saved_details.altdomain, saved_details.port);
             accounts_set_jid(saved_details.name, saved_details.jid);
 
-            prof_handle_login_account_success(saved_details.name);
+            handle_login_account_success(saved_details.name);
             saved_account.name = strdup(saved_details.name);
             saved_account.passwd = strdup(saved_details.passwd);
 
@@ -483,16 +429,10 @@ _connection_handler(xmpp_conn_t * const conn,
 
         chat_sessions_init();
 
-        xmpp_handler_add(conn, connection_error_handler, NULL, NULL, STANZA_TYPE_ERROR, ctx);
         roster_add_handlers();
         message_add_handlers();
         presence_add_handlers();
         iq_add_handlers();
-
-        if (prefs_get_autoping() != 0) {
-            int millis = prefs_get_autoping() * 1000;
-            xmpp_timed_handler_add(conn, _ping_timed_handler, millis, ctx);
-        }
 
         roster_request();
         bookmark_request();
@@ -511,7 +451,7 @@ _connection_handler(xmpp_conn_t * const conn,
         // lost connection for unkown reason
         if (jabber_conn.conn_status == JABBER_CONNECTED) {
             log_debug("Connection handler: Lost connection for unknown reason");
-            prof_handle_lost_connection();
+            handle_lost_connection();
             if (prefs_get_reconnect() != 0) {
                 assert(reconnect_timer == NULL);
                 reconnect_timer = g_timer_new();
@@ -528,7 +468,7 @@ _connection_handler(xmpp_conn_t * const conn,
             log_debug("Connection handler: Login failed");
             if (reconnect_timer == NULL) {
                 log_debug("Connection handler: No reconnect timer");
-                prof_handle_failed_login();
+                handle_failed_login();
                 _connection_free_saved_account();
                 _connection_free_saved_details();
                 _connection_free_session_data();
@@ -549,20 +489,6 @@ _connection_handler(xmpp_conn_t * const conn,
     } else {
         log_error("Connection handler: Unknown status");
     }
-}
-
-static int
-_ping_timed_handler(xmpp_conn_t * const conn, void * const userdata)
-{
-    if (jabber_conn.conn_status == JABBER_CONNECTED) {
-        xmpp_ctx_t *ctx = (xmpp_ctx_t *)userdata;
-
-        xmpp_stanza_t *iq = stanza_create_ping_iq(ctx);
-        xmpp_send(conn, iq);
-        xmpp_stanza_release(iq);
-    }
-
-    return 1;
 }
 
 static log_level_t
@@ -615,3 +541,19 @@ _xmpp_get_file_logger()
     return file_log;
 }
 
+void
+jabber_init_module(void)
+{
+    jabber_init = _jabber_init;
+    jabber_connect_with_account = _jabber_connect_with_account;
+    jabber_connect_with_details = _jabber_connect_with_details;
+    jabber_disconnect = _jabber_disconnect;
+    jabber_shutdown = _jabber_shutdown;
+    jabber_process_events = _jabber_process_events;
+    jabber_get_available_resources = _jabber_get_available_resources;
+    jabber_get_connection_status = _jabber_get_connection_status;
+    jabber_get_fulljid = _jabber_get_fulljid;
+    jabber_get_domain = _jabber_get_domain;
+    jabber_get_presence_message = _jabber_get_presence_message;
+    jabber_get_account_name = _jabber_get_account_name;
+}

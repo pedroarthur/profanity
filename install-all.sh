@@ -1,6 +1,18 @@
-#!/bin/sh
+#!/bin/bash
+
+set -o errtrace
 
 STATUS=development
+
+error_handler()
+{
+        ERR_CODE=$?
+        echo "Error $ERR_CODE with command '$BASH_COMMAND' on line ${BASH_LINENO[0]}. Exiting."
+        exit $ERR_CODE
+
+}
+
+trap error_handler ERR
 
 debian_prepare()
 {
@@ -12,7 +24,7 @@ debian_prepare()
     echo
     echo Profanity installer... installing dependencies
     echo
-    sudo apt-get -y install git automake autoconf libssl-dev libexpat1-dev libncursesw5-dev libglib2.0-dev libnotify-dev libcurl3-dev libxss-dev
+    sudo apt-get -y install git automake autoconf libssl-dev libexpat1-dev libncursesw5-dev libglib2.0-dev libnotify-dev libcurl3-dev libxss-dev libotr2-dev
 
 }
 
@@ -23,8 +35,16 @@ fedora_prepare()
     echo
 
     ARCH=`arch`
-    
-    sudo yum -y install gcc git autoconf automake openssl-devel.$ARCH expat-devel.$ARCH ncurses-devel.$ARCH  glib2-devel.$ARCH libnotify-devel.$ARCH libcurl-devel.$ARCH libXScrnSaver-devel.$ARCH
+
+    sudo yum -y install gcc git autoconf automake openssl-devel.$ARCH expat-devel.$ARCH ncurses-devel.$ARCH  glib2-devel.$ARCH libnotify-devel.$ARCH libcurl-devel.$ARCH libXScrnSaver-devel.$ARCH libotr3-devel.$ARCH
+}
+
+opensuse_prepare()
+{
+ echo
+ echo Profanity installer...installing dependencies
+ echo
+ sudo zypper -n in gcc git automake make autoconf libopenssl-devel expat libexpat-devel ncurses-devel glib2-devel libnotify-devel libcurl-devel libXScrnSaver-devel libotr-devel
 }
 
 cygwin_prepare()
@@ -39,13 +59,11 @@ cygwin_prepare()
     mv apt-cyg /usr/local/bin/
 
     if [ -n "$CYG_MIRROR" ]; then
-        apt-cyg -m $CYG_MIRROR install git make gcc-core m4 automake autoconf pkg-config openssl-devel libexpat-devel zlib-devel libncursesw-devel libglib2.0-devel libcurl-devel libidn-devel libssh2-devel libkrb5-devel openldap-devel
+        apt-cyg -m $CYG_MIRROR install git make gcc-core m4 automake autoconf pkg-config openssl-devel libexpat-devel zlib-devel libncursesw-devel libglib2.0-devel libcurl-devel libidn-devel libssh2-devel libkrb5-devel openldap-devel libgcrypt-devel
     else
-        apt-cyg install git make gcc-core m4 automake autoconf pkg-config openssl-devel libexpat-devel zlib-devel libncursesw-devel libglib2.0-devel libcurl-devel libidn-devel libssh2-devel libkrb5-devel openldap-devel
+        apt-cyg install git make gcc-core m4 automake autoconf pkg-config openssl-devel libexpat-devel zlib-devel libncursesw-devel libglib2.0-devel libcurl-devel libidn-devel libssh2-devel libkrb5-devel openldap-devel libgcrypt-devel
 
     fi
-
-    ln -s /usr/bin/gcc-3.exe /usr/bin/gcc.exe
 
     export LIBRARY_PATH=/usr/local/lib/
 }
@@ -138,6 +156,8 @@ if [ "${OS}" = "Linux" ]; then
         DIST=fedora
     elif [ -f /etc/debian_version ]; then
         DIST=debian
+    elif [ -f /etc/os-release ]; then
+        DIST=opensuse
     fi
 else
     echo $OS | grep -i cygwin
@@ -156,6 +176,10 @@ fedora)     fedora_prepare
             install_profanity
             ;;
 debian)     debian_prepare
+            install_lib_strophe
+            install_profanity
+            ;;
+opensuse)   opensuse_prepare
             install_lib_strophe
             install_profanity
             ;;

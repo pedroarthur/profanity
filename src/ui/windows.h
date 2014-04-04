@@ -1,7 +1,7 @@
 /*
  * windows.h
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -35,8 +35,8 @@ int wins_get_num(ProfWin *window);
 int wins_get_current_num(void);
 void wins_close_current(void);
 void wins_close_by_num(int i);
-void wins_refresh_current(void);
-void wins_refresh_console(void);
+void wins_update_virtual_current(void);
+void wins_update_virtual_console(void);
 void wins_clear_current(void);
 gboolean wins_is_current(ProfWin *window);
 ProfWin * wins_new(const char * const from, win_type_t type);

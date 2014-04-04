@@ -1,7 +1,7 @@
 /*
  * titlebar.c
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -25,127 +25,109 @@
 
 #include "common.h"
 #include "config/theme.h"
+#include "config/preferences.h"
 #include "ui/ui.h"
+#include "ui/windows.h"
+#include "ui/window.h"
+#include "roster_list.h"
 
-static WINDOW *title_bar;
+#define CONSOLE_TITLE "Profanity. Type /help for help information."
+
+static WINDOW *win;
 static char *current_title = NULL;
-static const char *recipient = NULL;
+static char *current_recipient = NULL;
+static contact_presence_t current_presence;
+
+static gboolean typing;
 static GTimer *typing_elapsed;
-static int dirty;
-static contact_presence_t current_status;
 
-static void _title_bar_draw_title(void);
-static void _title_bar_draw_status(void);
+static void _title_bar_draw(void);
 
-void
-create_title_bar(void)
+static void
+_create_title_bar(void)
 {
     int cols = getmaxx(stdscr);
 
-    title_bar = newwin(1, cols, 0, 0);
-    wbkgd(title_bar, COLOUR_TITLE_TEXT);
-    title_bar_title();
-    title_bar_set_status(CONTACT_OFFLINE);
-    dirty = TRUE;
+    win = newwin(1, cols, 0, 0);
+    wbkgd(win, COLOUR_TITLE_TEXT);
+    title_bar_console();
+    title_bar_set_presence(CONTACT_OFFLINE);
+    wnoutrefresh(win);
+    inp_put_back();
 }
 
-void
-title_bar_title(void)
+static void
+_title_bar_console(void)
 {
-    werase(title_bar);
-    recipient = NULL;
+    werase(win);
+    current_recipient = NULL;
+    typing = FALSE;
     typing_elapsed = NULL;
-    title_bar_show("Profanity. Type /help for help information.");
-    _title_bar_draw_status();
-    dirty = TRUE;
+
+    free(current_title);
+    current_title = strdup(CONSOLE_TITLE);
+
+    _title_bar_draw();
 }
 
-void
-title_bar_resize(void)
+static void
+_title_bar_resize(void)
 {
     int cols = getmaxx(stdscr);
 
-    wresize(title_bar, 1, cols);
-    wbkgd(title_bar, COLOUR_TITLE_TEXT);
-    werase(title_bar);
-    _title_bar_draw_title();
-    _title_bar_draw_status();
-    dirty = TRUE;
+    wresize(win, 1, cols);
+    wbkgd(win, COLOUR_TITLE_TEXT);
+
+    _title_bar_draw();
 }
 
-void
-title_bar_refresh(void)
+static void
+_title_bar_update_virtual(void)
 {
-    if (recipient != NULL) {
+    if (current_recipient != NULL) {
 
         if (typing_elapsed != NULL) {
             gdouble seconds = g_timer_elapsed(typing_elapsed, NULL);
 
             if (seconds >= 10) {
-
-                if (current_title != NULL) {
-                    free(current_title);
-                }
-
-                current_title = (char *) malloc(strlen(recipient) + 1);
-                strcpy(current_title, recipient);
-
-                title_bar_draw();
+                typing = FALSE;
 
                 g_timer_destroy(typing_elapsed);
                 typing_elapsed = NULL;
 
-                dirty = TRUE;
+                _title_bar_draw();
             }
         }
     }
-
-    if (dirty) {
-        wrefresh(title_bar);
-        inp_put_back();
-        dirty = FALSE;
-    }
 }
 
-void
-title_bar_show(const char * const title)
+static void
+_title_bar_set_presence(contact_presence_t presence)
 {
-    if (current_title != NULL)
-        free(current_title);
-
-    current_title = (char *) malloc(strlen(title) + 1);
-    strcpy(current_title, title);
-    _title_bar_draw_title();
+    current_presence = presence;
+    _title_bar_draw();
 }
 
-void
-title_bar_set_status(contact_presence_t status)
-{
-    current_status = status;
-    _title_bar_draw_status();
-}
-
-void
-title_bar_set_recipient(const char * const from)
+static void
+_title_bar_set_recipient(const char * const recipient)
 {
     if (typing_elapsed != NULL) {
         g_timer_destroy(typing_elapsed);
         typing_elapsed = NULL;
-    }
-    recipient = from;
-
-    if (current_title != NULL) {
-        free(current_title);
+        typing = FALSE;
     }
 
-    current_title = (char *) malloc(strlen(from) + 1);
-    strcpy(current_title, from);
+    free(current_recipient);
+    current_recipient = strdup(recipient);
 
-    dirty = TRUE;
+    free(current_title);
+    current_title = strdup(recipient);
+
+    _title_bar_draw();
 }
 
-void
-title_bar_set_typing(gboolean is_typing)
+static void
+_title_bar_set_typing(gboolean is_typing)
 {
     if (is_typing) {
         if (typing_elapsed != NULL) {
@@ -155,75 +137,135 @@ title_bar_set_typing(gboolean is_typing)
         }
     }
 
-    if (current_title != NULL) {
-        free(current_title);
+    typing = is_typing;
+
+
+    _title_bar_draw();
+}
+
+static void
+_title_bar_draw(void)
+{
+    werase(win);
+
+    // show title
+    wmove(win, 0, 0);
+    int i;
+    for (i = 0; i < 45; i++)
+        waddch(win, ' ');
+    mvwprintw(win, 0, 0, " %s", current_title);
+
+
+#ifdef HAVE_LIBOTR
+    // show privacy
+    if (current_recipient != NULL) {
+        char *recipient_jid = roster_barejid_from_name(current_recipient);
+        ProfWin *current = wins_get_by_recipient(recipient_jid);
+        if (current != NULL) {
+            if (current->type == WIN_CHAT) {
+                if (!current->is_otr) {
+                    if (prefs_get_boolean(PREF_OTR_WARN)) {
+                        wprintw(win, " ");
+                        wattron(win, COLOUR_TITLE_BRACKET);
+                        wprintw(win, "[");
+                        wattroff(win, COLOUR_TITLE_BRACKET);
+                        wattron(win, COLOUR_TITLE_UNENCRYPTED);
+                        wprintw(win, "unencrypted");
+                        wattroff(win, COLOUR_TITLE_UNENCRYPTED);
+                        wattron(win, COLOUR_TITLE_BRACKET);
+                        wprintw(win, "]");
+                        wattroff(win, COLOUR_TITLE_BRACKET);
+                    }
+                } else {
+                    wprintw(win, " ");
+                    wattron(win, COLOUR_TITLE_BRACKET);
+                    wprintw(win, "[");
+                    wattroff(win, COLOUR_TITLE_BRACKET);
+                    wattron(win, COLOUR_TITLE_ENCRYPTED);
+                    wprintw(win, "OTR");
+                    wattroff(win, COLOUR_TITLE_ENCRYPTED);
+                    wattron(win, COLOUR_TITLE_BRACKET);
+                    wprintw(win, "]");
+                    wattroff(win, COLOUR_TITLE_BRACKET);
+                    if (current->is_trusted) {
+                        wprintw(win, " ");
+                        wattron(win, COLOUR_TITLE_BRACKET);
+                        wprintw(win, "[");
+                        wattroff(win, COLOUR_TITLE_BRACKET);
+                        wattron(win, COLOUR_TITLE_TRUSTED);
+                        wprintw(win, "trusted");
+                        wattroff(win, COLOUR_TITLE_TRUSTED);
+                        wattron(win, COLOUR_TITLE_BRACKET);
+                        wprintw(win, "]");
+                        wattroff(win, COLOUR_TITLE_BRACKET);
+                    } else {
+                        wprintw(win, " ");
+                        wattron(win, COLOUR_TITLE_BRACKET);
+                        wprintw(win, "[");
+                        wattroff(win, COLOUR_TITLE_BRACKET);
+                        wattron(win, COLOUR_TITLE_UNTRUSTED);
+                        wprintw(win, "untrusted");
+                        wattroff(win, COLOUR_TITLE_UNTRUSTED);
+                        wattron(win, COLOUR_TITLE_BRACKET);
+                        wprintw(win, "]");
+                        wattroff(win, COLOUR_TITLE_BRACKET);
+                    }
+                }
+            }
+        }
+    }
+#endif
+
+    // show contact typing
+    if (typing) {
+        wprintw(win, " (typing...)");
     }
 
-    if (is_typing) {
-        current_title = (char *) malloc(strlen(recipient) + 13);
-        sprintf(current_title, "%s (typing...)", recipient);
-    } else {
-        current_title = (char *) malloc(strlen(recipient) + 1);
-        strcpy(current_title, recipient);
+    // show presence
+    int cols = getmaxx(stdscr);
+
+    wattron(win, COLOUR_TITLE_BRACKET);
+    mvwaddch(win, 0, cols - 14, '[');
+    wattroff(win, COLOUR_TITLE_BRACKET);
+
+    switch (current_presence)
+    {
+        case CONTACT_ONLINE:
+            mvwprintw(win, 0, cols - 13, " ...online ");
+            break;
+        case CONTACT_AWAY:
+            mvwprintw(win, 0, cols - 13, " .....away ");
+            break;
+        case CONTACT_DND:
+            mvwprintw(win, 0, cols - 13, " ......dnd ");
+            break;
+        case CONTACT_CHAT:
+            mvwprintw(win, 0, cols - 13, " .....chat ");
+            break;
+        case CONTACT_XA:
+            mvwprintw(win, 0, cols - 13, " .......xa ");
+            break;
+        case CONTACT_OFFLINE:
+            mvwprintw(win, 0, cols - 13, " ..offline ");
+            break;
     }
 
-    dirty = TRUE;
+    wattron(win, COLOUR_TITLE_BRACKET);
+    mvwaddch(win, 0, cols - 2, ']');
+    wattroff(win, COLOUR_TITLE_BRACKET);
+
+    wnoutrefresh(win);
+    inp_put_back();
 }
 
 void
-title_bar_draw(void)
+titlebar_init_module(void)
 {
-    werase(title_bar);
-    _title_bar_draw_status();
-    _title_bar_draw_title();
-}
-
-static void
-_title_bar_draw_status(void)
-{
-    int cols = getmaxx(stdscr);
-
-    wattron(title_bar, COLOUR_TITLE_BRACKET);
-    mvwaddch(title_bar, 0, cols - 14, '[');
-    wattroff(title_bar, COLOUR_TITLE_BRACKET);
-
-    switch (current_status)
-    {
-        case CONTACT_ONLINE:
-            mvwprintw(title_bar, 0, cols - 13, " ...online ");
-            break;
-        case CONTACT_AWAY:
-            mvwprintw(title_bar, 0, cols - 13, " .....away ");
-            break;
-        case CONTACT_DND:
-            mvwprintw(title_bar, 0, cols - 13, " ......dnd ");
-            break;
-        case CONTACT_CHAT:
-            mvwprintw(title_bar, 0, cols - 13, " .....chat ");
-            break;
-        case CONTACT_XA:
-            mvwprintw(title_bar, 0, cols - 13, " .......xa ");
-            break;
-        case CONTACT_OFFLINE:
-            mvwprintw(title_bar, 0, cols - 13, " ..offline ");
-            break;
-    }
-
-    wattron(title_bar, COLOUR_TITLE_BRACKET);
-    mvwaddch(title_bar, 0, cols - 2, ']');
-    wattroff(title_bar, COLOUR_TITLE_BRACKET);
-
-    dirty = TRUE;
-}
-
-static void
-_title_bar_draw_title(void)
-{
-    wmove(title_bar, 0, 0);
-    int i;
-    for (i = 0; i < 45; i++)
-        waddch(title_bar, ' ');
-    mvwprintw(title_bar, 0, 0, " %s", current_title);
-
-    dirty = TRUE;
+    create_title_bar = _create_title_bar;
+    title_bar_console = _title_bar_console;
+    title_bar_resize = _title_bar_resize;
+    title_bar_update_virtual = _title_bar_update_virtual;
+    title_bar_set_presence = _title_bar_set_presence;
+    title_bar_set_recipient = _title_bar_set_recipient;
+    title_bar_set_typing = _title_bar_set_typing;
 }

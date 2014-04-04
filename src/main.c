@@ -1,7 +1,7 @@
 /*
  * main.c
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -24,15 +24,45 @@
 
 #include "config.h"
 #ifdef HAVE_GIT_VERSION
-#include "gitversion.c"
+#include "gitversion.h"
 #endif
 
 #include "profanity.h"
+
+#ifdef HAVE_LIBOTR
+#include "otr/otr.h"
+#endif
+#include "xmpp/xmpp.h"
+#include "ui/ui.h"
 
 static gboolean disable_tls = FALSE;
 static gboolean version = FALSE;
 static char *log = "INFO";
 static char *account_name = NULL;
+
+static void
+_init_modules(void)
+{
+    jabber_init_module();
+    bookmark_init_module();
+    capabilities_init_module();
+    iq_init_module();
+    message_init_module();
+    presence_init_module();
+    roster_init_module();
+
+    ui_init_module();
+    console_init_module();
+    inputwin_init_module();
+    notifier_init_module();
+    statusbar_init_module();
+    titlebar_init_module();
+
+    accounts_init_module();
+#ifdef HAVE_LIBOTR
+    otr_init_module();
+#endif
+}
 
 int
 main(int argc, char **argv)
@@ -71,7 +101,7 @@ main(int argc, char **argv)
             g_print("Profanity, version %s\n", PACKAGE_VERSION);
         }
 
-        g_print("Copyright (C) 2012, 2013 James Booth <%s>.\n", PACKAGE_BUGREPORT);
+        g_print("Copyright (C) 2012 - 2014 James Booth <%s>.\n", PACKAGE_BUGREPORT);
         g_print("License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n");
         g_print("\n");
         g_print("This is free software; you are free to change and redistribute it.\n");
@@ -79,6 +109,7 @@ main(int argc, char **argv)
         return 0;
     }
 
+    _init_modules();
     prof_run(disable_tls, log, account_name);
 
     return 0;

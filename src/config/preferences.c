@@ -1,7 +1,7 @@
 /*
  * preferences.c
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -23,6 +23,7 @@
 #include "config.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <glib.h>
@@ -43,6 +44,7 @@
 #define PREF_GROUP_NOTIFICATIONS "notifications"
 #define PREF_GROUP_PRESENCE "presence"
 #define PREF_GROUP_CONNECTION "connection"
+#define PREF_GROUP_ALIAS "alias"
 
 static gchar *prefs_loc;
 static GKeyFile *prefs;
@@ -86,6 +88,7 @@ prefs_close(void)
 {
     autocomplete_free(boolean_choice_ac);
     g_key_file_free(prefs);
+    prefs = NULL;
 }
 
 char *
@@ -257,6 +260,87 @@ prefs_set_autoaway_time(gint value)
     _save_prefs();
 }
 
+gboolean
+prefs_add_alias(const char * const name, const char * const value)
+{
+    if (g_key_file_has_key(prefs, PREF_GROUP_ALIAS, name, NULL)) {
+        return FALSE;
+    } else {
+        g_key_file_set_string(prefs, PREF_GROUP_ALIAS, name, value);
+        _save_prefs();
+        return TRUE;
+    }
+}
+
+char *
+prefs_get_alias(const char * const name)
+{
+    return g_key_file_get_string(prefs, PREF_GROUP_ALIAS, name, NULL);
+
+}
+
+gboolean
+prefs_remove_alias(const char * const name)
+{
+    if (!g_key_file_has_key(prefs, PREF_GROUP_ALIAS, name, NULL)) {
+        return FALSE;
+    } else {
+        g_key_file_remove_key(prefs, PREF_GROUP_ALIAS, name, NULL);
+        _save_prefs();
+        return TRUE;
+    }
+}
+
+static gint
+_alias_cmp(gconstpointer *p1, gconstpointer *p2)
+{
+    ProfAlias *alias1 = (ProfAlias*)p1;
+    ProfAlias *alias2 = (ProfAlias*)p2;
+
+    return strcmp(alias1->name, alias2->name);
+}
+
+GList *
+prefs_get_aliases(void)
+{
+    if (!g_key_file_has_group(prefs, PREF_GROUP_ALIAS)) {
+        return NULL;
+    } else {
+        GList *result = NULL;
+        gsize len;
+        gchar **keys = g_key_file_get_keys(prefs, PREF_GROUP_ALIAS, &len, NULL);
+        int i;
+        for (i = 0; i < len; i++) {
+            char *name = keys[i];
+            char *value = g_key_file_get_string(prefs, PREF_GROUP_ALIAS, name, NULL);
+
+            ProfAlias *alias = malloc(sizeof(struct prof_alias_t));
+            alias->name = strdup(name);
+            alias->value = strdup(value);
+
+            result = g_list_insert_sorted(result, alias, (GCompareFunc)_alias_cmp);
+        }
+
+        g_strfreev(keys);
+
+        return result;
+    }
+}
+
+void
+_free_alias(ProfAlias *alias)
+{
+    FREE_SET_NULL(alias->name);
+    FREE_SET_NULL(alias->value);
+    FREE_SET_NULL(alias);
+}
+
+void
+prefs_free_aliases(GList *aliases)
+{
+    g_list_free_full(aliases, (GDestroyNotify)_free_alias);
+}
+
 static void
 _save_prefs(void)
 {
@@ -287,30 +371,35 @@ _get_group(preference_t pref)
         case PREF_BEEP:
         case PREF_THEME:
         case PREF_VERCHECK:
-        case PREF_TITLEBARVERSION:
+        case PREF_TITLEBAR:
         case PREF_FLASH:
         case PREF_INTYPE:
         case PREF_HISTORY:
         case PREF_MOUSE:
         case PREF_STATUSES:
-            return "ui";
+        case PREF_STATUSES_CONSOLE:
+        case PREF_STATUSES_CHAT:
+        case PREF_STATUSES_MUC:
+        case PREF_OTR_WARN:
+            return PREF_GROUP_UI;
         case PREF_STATES:
         case PREF_OUTTYPE:
-            return "chatstates";
+            return PREF_GROUP_CHATSTATES;
         case PREF_NOTIFY_TYPING:
         case PREF_NOTIFY_MESSAGE:
         case PREF_NOTIFY_INVITE:
         case PREF_NOTIFY_SUB:
-            return "notifications";
+            return PREF_GROUP_NOTIFICATIONS;
         case PREF_CHLOG:
         case PREF_GRLOG:
-            return "logging";
+        case PREF_OTR_LOG:
+            return PREF_GROUP_LOGGING;
         case PREF_AUTOAWAY_CHECK:
         case PREF_AUTOAWAY_MODE:
         case PREF_AUTOAWAY_MESSAGE:
-            return "presence";
+            return PREF_GROUP_PRESENCE;
         case PREF_CONNECT_ACCOUNT:
-            return "connection";
+            return PREF_GROUP_CONNECTION;
         default:
             return NULL;
     }
@@ -329,8 +418,8 @@ _get_key(preference_t pref)
             return "theme";
         case PREF_VERCHECK:
             return "vercheck";
-        case PREF_TITLEBARVERSION:
-            return "titlebar.version";
+        case PREF_TITLEBAR:
+            return "titlebar";
         case PREF_FLASH:
             return "flash";
         case PREF_INTYPE:
@@ -341,6 +430,12 @@ _get_key(preference_t pref)
             return "mouse";
         case PREF_STATUSES:
             return "statuses";
+        case PREF_STATUSES_CONSOLE:
+            return "statuses.console";
+        case PREF_STATUSES_CHAT:
+            return "statuses.chat";
+        case PREF_STATUSES_MUC:
+            return "statuses.muc";
         case PREF_STATES:
             return "enabled";
         case PREF_OUTTYPE:
@@ -365,6 +460,10 @@ _get_key(preference_t pref)
             return "autoaway.message";
         case PREF_CONNECT_ACCOUNT:
             return "account";
+        case PREF_OTR_LOG:
+            return "otr";
+        case PREF_OTR_WARN:
+            return "otr.warn";
         default:
             return NULL;
     }
@@ -375,7 +474,8 @@ _get_default_boolean(preference_t pref)
 {
     switch (pref)
     {
-        case PREF_STATUSES:
+        case PREF_TITLEBAR:
+        case PREF_OTR_WARN:
         case PREF_AUTOAWAY_CHECK:
             return TRUE;
         default:
@@ -390,6 +490,12 @@ _get_default_string(preference_t pref)
     {
         case PREF_AUTOAWAY_MODE:
             return "off";
+        case PREF_OTR_LOG:
+            return "redact";
+        case PREF_STATUSES_CONSOLE:
+        case PREF_STATUSES_CHAT:
+        case PREF_STATUSES_MUC:
+            return "all";
         default:
             return NULL;
     }

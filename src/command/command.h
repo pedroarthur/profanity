@@ -1,7 +1,7 @@
 /*
  * command.h
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -32,9 +32,16 @@ void cmd_uninit(void);
 
 void cmd_autocomplete(char *input, int *size);
 void cmd_reset_autocomplete(void);
+void cmd_autocomplete_add(char *value);
+void cmd_autocomplete_remove(char *value);
+void cmd_alias_add(char *value);
+void cmd_alias_remove(char *value);
 
 gboolean cmd_execute(const char * const command, const char * const inp);
+gboolean cmd_execute_alias(const char * const inp, gboolean *ran);
 gboolean cmd_execute_default(const char * const inp);
+
+gboolean cmd_exists(char *cmd);
 
 GSList * cmd_get_basic_help(void);
 GSList * cmd_get_settings_help(void);

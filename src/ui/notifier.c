@@ -1,7 +1,7 @@
 /*
  * notifier.c
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -23,6 +23,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include <glib.h>
 #ifdef HAVE_LIBNOTIFY
@@ -39,16 +40,16 @@
 static void _notify(const char * const message, int timeout,
     const char * const category);
 
-void
-notifier_init(void)
+static void
+_notifier_init(void)
 {
 #ifdef HAVE_LIBNOTIFY
     notify_init("Profanity");
 #endif
 }
 
-void
-notifier_uninit(void)
+static void
+_notifier_uninit(void)
 {
 #ifdef HAVE_LIBNOTIFY
     if (notify_is_initted()) {
@@ -57,8 +58,8 @@ notifier_uninit(void)
 #endif
 }
 
-void
-notify_typing(const char * const handle)
+static void
+_notify_typing(const char * const handle)
 {
     char message[strlen(handle) + 1 + 11];
     sprintf(message, "%s: typing...", handle);
@@ -66,8 +67,8 @@ notify_typing(const char * const handle)
     _notify(message, 10000, "Incoming message");
 }
 
-void
-notify_invite(const char * const from, const char * const room,
+static void
+_notify_invite(const char * const from, const char * const room,
     const char * const reason)
 {
     GString *message = g_string_new("Room invite\nfrom: ");
@@ -83,8 +84,8 @@ notify_invite(const char * const from, const char * const room,
     g_string_free(message, TRUE);
 }
 
-void
-notify_message(const char * const handle, int win)
+static void
+_notify_message(const char * const handle, int win)
 {
     char message[strlen(handle) + 1 + 14];
     sprintf(message, "%s: message (%d).", handle, win);
@@ -92,8 +93,8 @@ notify_message(const char * const handle, int win)
     _notify(message, 10000, "incoming message");
 }
 
-void
-notify_room_message(const char * const handle, const char * const room, int win)
+static void
+_notify_room_message(const char * const handle, const char * const room, int win)
 {
     GString *text = g_string_new("");
 
@@ -105,8 +106,8 @@ notify_room_message(const char * const handle, const char * const room, int win)
     g_string_free(text, TRUE);
 }
 
-void
-notify_subscription(const char * const from)
+static void
+_notify_subscription(const char * const from)
 {
     GString *message = g_string_new("Subscription request: \n");
     g_string_append(message, from);
@@ -114,8 +115,8 @@ notify_subscription(const char * const from)
     g_string_free(message, TRUE);
 }
 
-void
-notify_remind(void)
+static void
+_notify_remind(void)
 {
     gint unread = ui_unread();
     gint open = muc_invite_count();
@@ -192,17 +193,56 @@ _notify(const char * const message, int timeout,
     nid.uVersion = NOTIFYICON_VERSION;
     //nid.uCallbackMessage = WM_MYMESSAGE;
     nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-    strcpy(nid.szTip, "Tray Icon");
+    strncpy(nid.szTip, "Tray Icon", 10);
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     Shell_NotifyIcon(NIM_ADD, &nid);
 
     // For a Ballon Tip
     nid.uFlags = NIF_INFO;
-    strcpy(nid.szInfoTitle, "Profanity"); // Title
-    strcpy(nid.szInfo, message); // Copy Tip
+    strncpy(nid.szInfoTitle, "Profanity", 10); // Title
+    strncpy(nid.szInfo, message, 256); // Copy Tip
     nid.uTimeout = timeout;  // 3 Seconds
     nid.dwInfoFlags = NIIF_INFO;
 
     Shell_NotifyIcon(NIM_MODIFY, &nid);
 #endif
+#ifdef HAVE_OSXNOTIFY
+    GString *notify_command = g_string_new("terminal-notifier -title 'Profanity' -message '");
+    g_string_append(notify_command, message);
+    g_string_append(notify_command, "'");
+
+    char *term_name = getenv("TERM_PROGRAM");
+    char *app_id = NULL;
+    if (g_strcmp0(term_name, "Apple_Terminal") == 0) {
+        app_id = "com.apple.Terminal";
+    } else if (g_strcmp0(term_name, "iTerm.app") == 0) {
+        app_id = "com.googlecode.iterm2";
+    }
+
+    if (app_id != NULL) {
+        g_string_append(notify_command, " -sender ");
+        g_string_append(notify_command, app_id);
+    }
+
+    int res = system(notify_command->str);
+    if (res == -1) {
+        log_error("Could not send desktop notificaion.");
+    }
+
+    g_string_free(notify_command, TRUE);
+#endif
 }
+
+void
+notifier_init_module(void)
+{
+    notifier_init = _notifier_init;
+    notifier_uninit = _notifier_uninit;
+    notify_typing = _notify_typing;
+    notify_invite = _notify_invite;
+    notify_message = _notify_message;
+    notify_room_message =  _notify_room_message;
+    notify_subscription = _notify_subscription;
+    notify_remind = _notify_remind;
+}
+

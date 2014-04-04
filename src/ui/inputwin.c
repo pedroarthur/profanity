@@ -1,7 +1,7 @@
 /*
  * inputwin.c
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -45,7 +45,7 @@
 #include "ui/windows.h"
 #include "xmpp/xmpp.h"
 
-#define _inp_win_refresh() prefresh(inp_win, 0, pad_start, rows-1, 0, rows-1, cols-1)
+#define _inp_win_update_virtual() pnoutrefresh(inp_win, 0, pad_start, rows-1, 0, rows-1, cols-1)
 
 static WINDOW *inp_win;
 static int pad_start = 0;
@@ -58,8 +58,8 @@ static int _printable(const wint_t ch);
 static void _clear_input(void);
 static void _go_to_end(int display_size);
 
-void
-create_input_window(void)
+static void
+_create_input_window(void)
 {
 #ifdef NCURSES_REENTRANT
     set_escdelay(25);
@@ -71,11 +71,11 @@ create_input_window(void)
     wbkgd(inp_win, COLOUR_INPUT_TEXT);
     keypad(inp_win, TRUE);
     wmove(inp_win, 0, 0);
-    _inp_win_refresh();
+    _inp_win_update_virtual();
 }
 
-void
-inp_win_resize(const char * const input, const int size)
+static void
+_inp_win_resize(const char * const input, const int size)
 {
     int inp_x;
     getmaxyx(stdscr, rows, cols);
@@ -89,23 +89,23 @@ inp_win_resize(const char * const input, const int size)
         }
     }
 
-    _inp_win_refresh();
+    _inp_win_update_virtual();
 }
 
-void
-inp_non_block(void)
+static void
+_inp_non_block(void)
 {
     wtimeout(inp_win, 20);
 }
 
-void
-inp_block(void)
+static void
+_inp_block(void)
 {
     wtimeout(inp_win, -1);
 }
 
-wint_t
-inp_get_char(char *input, int *size)
+static wint_t
+_inp_get_char(char *input, int *size)
 {
     int inp_x = 0;
     int i;
@@ -142,6 +142,10 @@ inp_get_char(char *input, int *size)
     // if it wasn't an arrow key etc
     if (!_handle_edit(result, ch, input, size)) {
         if (_printable(ch) && result != KEY_CODE_YES) {
+            if (*size >= INP_WIN_MAX) {
+                return ERR;
+            }
+
             inp_x = getcurx(inp_win);
 
             // handle insert if not at end of input
@@ -165,7 +169,7 @@ inp_get_char(char *input, int *size)
 
                 if (inp_x - pad_start > cols-3) {
                     pad_start++;
-                    _inp_win_refresh();
+                    _inp_win_update_virtual();
                 }
 
             // otherwise just append
@@ -189,7 +193,7 @@ inp_get_char(char *input, int *size)
                     getmaxyx(stdscr, rows, cols);
                     if (display_size - pad_start > cols-2) {
                         pad_start++;
-                        _inp_win_refresh();
+                        _inp_win_update_virtual();
                     }
                 }
             }
@@ -203,11 +207,12 @@ inp_get_char(char *input, int *size)
     return ch;
 }
 
-void
-inp_get_password(char *passwd)
+static void
+_inp_get_password(char *passwd)
 {
     _clear_input();
-    _inp_win_refresh();
+    _inp_win_update_virtual();
+    doupdate();
     noecho();
     mvwgetnstr(inp_win, 0, 1, passwd, MAX_PASSWORD_SIZE);
     wmove(inp_win, 0, 0);
@@ -215,17 +220,17 @@ inp_get_password(char *passwd)
     status_bar_clear();
 }
 
-void
-inp_put_back(void)
+static void
+_inp_put_back(void)
 {
-    _inp_win_refresh();
+    _inp_win_update_virtual();
 }
 
-void
-inp_replace_input(char *input, const char * const new_input, int *size)
+static void
+_inp_replace_input(char *input, const char * const new_input, int *size)
 {
     int display_size;
-    strcpy(input, new_input);
+    strncpy(input, new_input, INP_WIN_MAX);
     *size = strlen(input);
     display_size = g_utf8_strlen(input, *size);
     inp_win_reset();
@@ -234,12 +239,12 @@ inp_replace_input(char *input, const char * const new_input, int *size)
     _go_to_end(display_size);
 }
 
-void
-inp_win_reset(void)
+static void
+_inp_win_reset(void)
 {
     _clear_input();
     pad_start = 0;
-    _inp_win_refresh();
+    _inp_win_update_virtual();
 }
 
 static void
@@ -315,7 +320,7 @@ _handle_edit(int result, const wint_t ch, char *input, int *size)
                 pad_start = 0;
             }
 
-            _inp_win_refresh();
+            _inp_win_update_virtual();
         }
         return 1;
 
@@ -357,7 +362,7 @@ _handle_edit(int result, const wint_t ch, char *input, int *size)
         // if gone off screen to right, jump right (half a screen worth)
         if (inp_x > pad_start + cols) {
             pad_start = pad_start + (cols / 2);
-            _inp_win_refresh();
+            _inp_win_update_virtual();
         }
 
         return 1;
@@ -443,7 +448,7 @@ _handle_edit(int result, const wint_t ch, char *input, int *size)
                 // current position off screen to left
                 if (inp_x - 1 < pad_start) {
                     pad_start--;
-                    _inp_win_refresh();
+                    _inp_win_update_virtual();
                 }
             }
             return 1;
@@ -458,7 +463,7 @@ _handle_edit(int result, const wint_t ch, char *input, int *size)
                 // current position off screen to right
                 if ((inp_x + 1 - pad_start) >= cols) {
                     pad_start++;
-                    _inp_win_refresh();
+                    _inp_win_update_virtual();
                 }
             }
             return 1;
@@ -493,7 +498,7 @@ _handle_edit(int result, const wint_t ch, char *input, int *size)
             }
             wmove(inp_win, 0, 0);
             pad_start = 0;
-            _inp_win_refresh();
+            _inp_win_update_virtual();
             return 1;
 
         case KEY_END:
@@ -561,7 +566,7 @@ _handle_backspace(int display_size, int inp_x, int *size, char *input)
                 pad_start = 0;
             }
 
-            _inp_win_refresh();
+            _inp_win_update_virtual();
         }
     }
 
@@ -673,7 +678,7 @@ _handle_alt_key(char *input, int *size, int key)
                     pad_start = 0;
                 }
 
-                _inp_win_refresh();
+                _inp_win_update_virtual();
             }
 
             return 1;
@@ -690,7 +695,7 @@ _go_to_end(int display_size)
     wmove(inp_win, 0, display_size);
     if (display_size > cols-2) {
         pad_start = display_size - cols + 1;
-        _inp_win_refresh();
+        _inp_win_update_virtual();
     }
 }
 
@@ -702,4 +707,18 @@ _printable(const wint_t ch)
     bytes[utf_len] = '\0';
     gunichar unichar = g_utf8_get_char(bytes);
     return g_unichar_isprint(unichar) && (ch != KEY_MOUSE);
+}
+
+void
+inputwin_init_module(void)
+{
+    create_input_window = _create_input_window;
+    inp_win_resize = _inp_win_resize;
+    inp_non_block = _inp_non_block;
+    inp_block = _inp_block;
+    inp_get_char = _inp_get_char;
+    inp_get_password = _inp_get_password;
+    inp_put_back = _inp_put_back;
+    inp_replace_input = _inp_replace_input;
+    inp_win_reset = _inp_win_reset;
 }

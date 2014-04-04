@@ -1,7 +1,7 @@
 /*
  * contact.c
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -172,11 +172,8 @@ p_contact_create_display_string(const PContact contact, const char * const resou
     GString *result_str = g_string_new("");
 
     // use nickname if exists
-    if (contact->name != NULL) {
-        g_string_append(result_str, contact->name);
-    } else {
-        g_string_append(result_str, contact->barejid);
-    }
+    const char *display_name = p_contact_name_or_jid(contact);
+    g_string_append(result_str, display_name);
 
     // add resource if not default provided by profanity
     if (strcmp(resource, "__prof_default") != 0) {

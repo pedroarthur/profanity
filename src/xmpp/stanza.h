@@ -1,7 +1,7 @@
 /*
  * stanza.h
  *
- * Copyright (C) 2012, 2013 James Booth <boothj5@gmail.com>
+ * Copyright (C) 2012 - 2014 James Booth <boothj5@gmail.com>
  *
  * This file is part of Profanity.
  *
@@ -46,6 +46,7 @@
 #define STANZA_NAME_TEXT "text"
 #define STANZA_NAME_SUBJECT "subject"
 #define STANZA_NAME_ITEM "item"
+#define STANZA_NAME_ITEMS "items"
 #define STANZA_NAME_C "c"
 #define STANZA_NAME_IDENTITY "identity"
 #define STANZA_NAME_FEATURE "feature"
@@ -53,8 +54,37 @@
 #define STANZA_NAME_REASON "reason"
 #define STANZA_NAME_GROUP "group"
 #define STANZA_NAME_PUBSUB "pubsub"
+#define STANZA_NAME_PUBLISH "publish"
+#define STANZA_NAME_PUBLISH_OPTIONS "publish-options"
+#define STANZA_NAME_FIELD "field"
 #define STANZA_NAME_STORAGE "storage"
+#define STANZA_NAME_NICK "nick"
 #define STANZA_NAME_CONFERENCE "conference"
+#define STANZA_NAME_VALUE "value"
+
+// error conditions
+#define STANZA_NAME_BAD_REQUEST "bad-request"
+#define STANZA_NAME_CONFLICT "conflict"
+#define STANZA_NAME_FEATURE_NOT_IMPLEMENTED "feature-not-implemented"
+#define STANZA_NAME_FORBIDDEN "forbidden"
+#define STANZA_NAME_GONE "gone"
+#define STANZA_NAME_INTERNAL_SERVER_ERROR "internal-server-error"
+#define STANZA_NAME_ITEM_NOT_FOUND "item-not-found"
+#define STANZA_NAME_JID_MALFORMED "jid-malformed"
+#define STANZA_NAME_NOT_ACCEPTABLE "not-acceptable"
+#define STANZA_NAME_NOT_ALLOWED "not-allowed"
+#define STANZA_NAME_NOT_AUTHORISED "not-authorised"
+#define STANZA_NAME_POLICY_VIOLATION "policy-violation"
+#define STANZA_NAME_RECIPIENT_UNAVAILABLE "recipient-unavailable"
+#define STANZA_NAME_REDIRECT "redirect"
+#define STANZA_NAME_REGISTRATION_REQUIRED "registration-required"
+#define STANZA_NAME_REMOTE_SERVER_NOT_FOUND "remote-server-not-found"
+#define STANZA_NAME_REMOTE_SERVER_TIMEOUT "remote-server-timeout"
+#define STANZA_NAME_RESOURCE_CONSTRAINT "resource-constraint"
+#define STANZA_NAME_SERVICE_UNAVAILABLE "service-unavailable"
+#define STANZA_NAME_SUBSCRIPTION_REQUIRED "subscription-required"
+#define STANZA_NAME_UNDEFINED_CONDITION "undefined-condition"
+#define STANZA_NAME_UNEXPECTED_REQUEST "unexpected-request"
 
 #define STANZA_TYPE_CHAT "chat"
 #define STANZA_TYPE_GROUPCHAT "groupchat"
@@ -86,6 +116,7 @@
 #define STANZA_ATTR_HASH "hash"
 #define STANZA_ATTR_CATEGORY "category"
 #define STANZA_ATTR_REASON "reason"
+#define STANZA_ATTR_AUTOJOIN "autojoin"
 
 #define STANZA_TEXT_AWAY "away"
 #define STANZA_TEXT_DND "dnd"
@@ -124,10 +155,10 @@ xmpp_stanza_t* stanza_create_chat_state(xmpp_ctx_t *ctx,
 
 xmpp_stanza_t* stanza_create_message(xmpp_ctx_t *ctx,
     const char * const recipient, const char * const type,
-    const char * const message, const char * const state, const char * const id);
+    const char * const message, const char * const state);
 
 xmpp_stanza_t* stanza_create_room_join_presence(xmpp_ctx_t * const ctx,
-    const char * const full_room_jid);
+    const char * const full_room_jid, const char * const passwd);
 
 xmpp_stanza_t* stanza_create_room_newnick_presence(xmpp_ctx_t *ctx,
     const char * const full_room_jid);
@@ -189,5 +220,7 @@ xmpp_stanza_t * stanza_create_roster_set(xmpp_ctx_t *ctx, const char * const id,
     const char * const jid, const char * const handle, GSList *groups);
 xmpp_stanza_t * stanza_create_roster_remove_set(xmpp_ctx_t *ctx,
     const char * const barejid);
+
+char * stanza_get_error_message(xmpp_stanza_t * const stanza);
 
 #endif
